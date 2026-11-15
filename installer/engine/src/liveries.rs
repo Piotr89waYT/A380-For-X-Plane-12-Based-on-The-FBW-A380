@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::install::{download, github_get, unzip, Ctx, ReleaseFile, AIRCRAFT_DIR};
+use crate::install::{aircraft_dir, download, github_get, unzip, Ctx, ReleaseFile};
 
 pub const INDEX: &str = "liveries.json";
 
@@ -118,7 +118,7 @@ pub fn available(repo: &str) -> Result<Vec<Livery>, String> {
 }
 
 pub fn liveries_dir(xplane: &Path) -> PathBuf {
-    xplane.join(AIRCRAFT_DIR).join("liveries")
+    xplane.join(aircraft_dir()).join("liveries")
 }
 
 pub fn mark_installed(liveries: &mut [Livery], dir: &Path) {
@@ -144,7 +144,7 @@ fn find<'a>(liveries: &'a [Livery], id: &str, edition: &str) -> Result<(&'a Live
 }
 
 pub fn install(xplane: &Path, repo: &str, id: &str, edition: &str, ctx: &Ctx) -> Result<String, String> {
-    if !xplane.join(AIRCRAFT_DIR).is_dir() {
+    if !xplane.join(aircraft_dir()).is_dir() {
         return Err("Install the A380 first; liveries go into its folder".into());
     }
     ctx.status("Reading the livery list...");

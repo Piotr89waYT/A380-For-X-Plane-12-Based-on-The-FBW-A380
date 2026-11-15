@@ -46,7 +46,7 @@ import { IncompatibleAddOnsCheck } from 'renderer/utils/IncompatibleAddOnsCheck'
 import { FreeDiskSpace, FreeDiskSpaceStatus } from 'renderer/utils/FreeDiskSpace';
 import { setAddonAndTrackLatestReleaseInfo } from 'renderer/redux/features/latestVersionNames';
 import { AddonData, ReleaseInfo } from 'renderer/utils/AddonData';
-import { Simulators } from 'renderer/utils/SimManager';
+import { isXPlane, xplaneSimArgs } from 'renderer/utils/SimManager';
 
 interface XPlaneEngineEvent {
   kind: 'status' | 'log' | 'progress' | 'done';
@@ -130,7 +130,7 @@ export class InstallManager {
       }
     }
 
-    if (addon.simulator === Simulators.XPlane12) {
+    if (isXPlane(addon.simulator)) {
       return this.installXPlaneAddon(addon, track, showModal);
     }
 
@@ -645,6 +645,7 @@ export class InstallManager {
     const textures = track.releaseModel.type === 'xplaneEngine' ? track.releaseModel.textures : undefined;
     const result: XPlaneEngineEvent = await ipcRenderer.invoke(channels.xplaneEngine.install, ourInstallID, [
       'install',
+      ...xplaneSimArgs(addon.simulator),
       '--xplane',
       Directories.simulatorBasePath(addon.simulator),
       ...(textures ? ['--textures', String(textures)] : []),
@@ -684,7 +685,7 @@ export class InstallManager {
     const args =
       addon.engine === 'amdb-bridge'
         ? ['amdb-status']
-        : ['status', '--xplane', Directories.simulatorBasePath(addon.simulator)];
+        : ['status', ...xplaneSimArgs(addon.simulator), '--xplane', Directories.simulatorBasePath(addon.simulator)];
     try {
       return (await ipcRenderer.invoke(channels.xplaneEngine.query, args)) as XPlaneStatus;
     } catch (e) {
@@ -810,11 +811,11 @@ export class InstallManager {
       return;
     }
 
-    if (addon.simulator === Simulators.XPlane12) {
+    if (isXPlane(addon.simulator)) {
       const result: XPlaneEngineEvent = await ipcRenderer.invoke(
         channels.xplaneEngine.install,
         Math.floor(Math.random() * 1_000_000),
-        ['uninstall', '--xplane', Directories.simulatorBasePath(addon.simulator)],
+        ['uninstall', ...xplaneSimArgs(addon.simulator), '--xplane', Directories.simulatorBasePath(addon.simulator)],
       );
       if (!result.ok) {
         await showModal(<ErrorDialog error={new Error(result.text)} />);
@@ -900,7 +901,7 @@ export class InstallManager {
       return installedTrack;
     }
 
-    if (addon.simulator === Simulators.XPlane12) {
+    if (isXPlane(addon.simulator)) {
       return null;
     }
 
@@ -940,7 +941,7 @@ export class InstallManager {
   private static async determineAddonInstallStatus(addon: Addon): Promise<InstallState> {
     console.log('[InstallManager](determineAddonInstallStatus) Checking install status');
 
-    if (addon.simulator === Simulators.XPlane12) {
+    if (isXPlane(addon.simulator)) {
       return this.determineXPlaneInstallStatus(addon);
     }
 
@@ -1004,7 +1005,7 @@ export class InstallManager {
       return;
     }
 
-    if (addon.simulator === Simulators.XPlane12) {
+    if (isXPlane(addon.simulator)) {
       this.setCurrentInstallState(addon, await this.determineXPlaneInstallStatus(addon));
       return;
     }

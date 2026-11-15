@@ -26,7 +26,7 @@ MARKER = "xp11_build.json"
 SCREEN_OBJ = "objects/a380_cockpit_003.obj"
 COCKPIT_OBJ = "objects/a380_cockpit_click.obj"
 SHRINK = ["FCU", "SCREEN_DU_RMP_1", "SCREEN_DU_RMP_2", "SCREEN_DU_RMP_3", "SCREEN_EFB", "SCREEN_OIT_LEFT", "SCREEN_OIT_RIGHT", "SCREEN_DU_MFD"]
-SKIP_DIRS = {"Output"}
+SKIP_DIRS = {"Output", "airfoils"}
 REAL_COPY_DIRS = ("plugins/fbw_a380_systems/64/",)
 REAL_COPY_MAX = 1 << 20
 

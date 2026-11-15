@@ -37,6 +37,12 @@ export const NavBar: FC = ({ children }) => {
             ) : (
               <span className="font-manrope text-2xl font-bold text-quasi-white">XP12</span>
             ))}
+          {managedSim === Simulators.XPlane11 && (
+            <span className="font-manrope text-2xl font-bold text-quasi-white">XP11</span>
+          )}
+          {managedSim === Simulators.XPlane12 && enabledSimulators().length > 1 && (
+            <span className="font-manrope text-xs font-bold text-quasi-white">XP12</span>
+          )}
         </ManagedSimSelector>
       </div>
       <div className="flex flex-col gap-y-5">{children}</div>

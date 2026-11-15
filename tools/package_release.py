@@ -95,11 +95,29 @@ INSTALLER_OWNED = {"fbw_xp_installed_version.txt", "FlyByWire A380X Updater.exe"
 
 # Never in the release either: the converter's own notes, dev pages and test
 # fixtures, source maps, logs, backups, and the user's own X-Plane state.
-DEV_FILES = {"README.txt", "cockpit_bindings.txt", "plugins/fbw_a380_systems/XPHFBW/ui/harness.html"}
+DEV_FILES = {"README.txt", "cockpit_bindings.txt", "plugins/fbw_a380_systems/XPHFBW/ui/harness.html", "xp11_build.json"}
 DEV_DIRS = ("Output/", "html_ui/Pages/VCockpit/Instruments/A380X/IFE/theme/", "html_ui/Pages/VCockpit/Instruments/A380X/EFB/", "plugins/fbw_a380_systems/XPHFBW/ui/test/", "plugins/fbw_a380_systems/XPHFBW/js/test/")
 BACKUP = re.compile(r"\.(before|with|bak|orig|old)\b|\.(map|log|tmp|pdb)$|~$|_prefs\.txt$", re.I)
 
 PATCH_INSTALL = {"aircraft": AIRCRAFT_IN_XPLANE, "steps": [TAKEOVER, {"kind": "copy", "from": "aircraft", "to": ""}, *FROM_XPLANE]}
+
+# X-Plane 11: the .acf comes from XP11's 747-400 plus XP12's A330 (both the user's own); XP11's own Boeing airfoils.
+DEFAULT_AIRCRAFT_XP11 = Path(r"D:\Steam Games\steamapps\common\X-Plane 11\Aircraft\A380 for X-Plane 11")
+AIRCRAFT_IN_XPLANE11 = "Aircraft/A380 for X-Plane 11"
+LAMINAR_747 = "Aircraft/Laminar Research/Boeing B747-400/747-400.acf"
+FROM_XPLANE11 = [
+    *[{"kind": "build_acf", "template": LAMINAR_747, "xplane12_template": f"{LAMINAR_A330}/A330.acf", "patch": acf + "patch", "to": acf} for acf in SHIPPED_ACFS],
+    {"kind": "download", "url": FCU_FONT_URL, "sha256": FCU_FONT_SHA256, "to": FCU_FONT},
+]
+INSTALL11 = {
+    "aircraft": AIRCRAFT_IN_XPLANE11,
+    "steps": [
+        {"kind": "sasl", "to": "plugins/sasl", "url": SASL_URL, "sha256": SASL_SHA256},
+        {"kind": "copy", "from": "aircraft", "to": ""},
+        *FROM_XPLANE11,
+    ],
+}
+PATCH_INSTALL11 = {"aircraft": AIRCRAFT_IN_XPLANE11, "steps": [{"kind": "copy", "from": "aircraft", "to": ""}, *FROM_XPLANE11]}
 
 
 def excluded(rel: str) -> bool:
@@ -132,12 +150,15 @@ def tool(name: str):
     return module
 
 
-def generated(aircraft: Path, sound_pack: Path, work: Path) -> tuple[dict[str, bytes], dict]:
+def generated(aircraft: Path, sound_pack: Path, work: Path, xp12_root: Path | None = None) -> tuple[dict[str, bytes], dict]:
     if sha256(aircraft / FCU_FONT) != FCU_FONT_SHA256:
         raise SystemExit(f"{FCU_FONT} no longer matches FlyByWire's copy at {FCU_FONT_URL}; update the URL and hash")
     acf_patch, spr, text_patch = tool("acf_patch"), tool("sound_pack_release"), tool("text_patch")
-    template = aircraft.parent.parent / LAMINAR_A330 / "A330.acf"
-    out = {f"{acf}patch": acf_patch.make(aircraft / acf, template).encode("latin-1") for acf in SHIPPED_ACFS}
+    if xp12_root:
+        template, second = aircraft.parent.parent / LAMINAR_747, xp12_root / LAMINAR_A330 / "A330.acf"
+    else:
+        template, second = aircraft.parent.parent / LAMINAR_A330 / "A330.acf", None
+    out = {f"{acf}patch": acf_patch.make(aircraft / acf, template, second).encode("latin-1") for acf in SHIPPED_ACFS}
     pack = spr.read_pack(sound_pack)
     trimmed, _ = spr.trim_snd((aircraft / SND).read_bytes().decode("latin-1"), pack["GUIDs.txt"].decode("latin-1"))
     work.mkdir(parents=True, exist_ok=True)
@@ -201,12 +222,13 @@ def tree_of(src: Path, extra: dict[str, bytes]) -> dict:
     return tree
 
 
-def previous(version: str) -> tuple[dict, dict]:
-    d = ROOT / "dist" / version
-    if not (d / "tree.json").exists() or not (d / "manifest.json").exists():
+def previous(version: str, suffix: str = "") -> tuple[dict, dict]:
+    d = ROOT / "dist" / f"{version}{suffix}"
+    tree, manifest = f"tree{suffix}.json", f"manifest{suffix}.json"
+    if not (d / tree).exists() or not (d / manifest).exists():
         d.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["gh", "release", "download", f"v{version}", "--repo", REPO, "-p", "tree.json", "-p", "manifest.json", "-D", str(d), "--clobber"], check=True)
-    return json.loads((d / "tree.json").read_text()), json.loads((d / "manifest.json").read_text())
+        subprocess.run(["gh", "release", "download", f"v{version}", "--repo", REPO, "-p", tree, "-p", manifest, "-D", str(d), "--clobber"], check=True)
+    return json.loads((d / tree).read_text()), json.loads((d / manifest).read_text())
 
 
 def main() -> None:
@@ -221,30 +243,37 @@ def main() -> None:
     ap.add_argument("--installer", type=Path, default=DEFAULT_INSTALLER)
     ap.add_argument("--texture-pack", action="append", default=[], metavar="SIZE=DIR")
     ap.add_argument("--sound-pack", type=Path, default=DEFAULT_SOUND_PACK)
+    ap.add_argument("--xp11", action="store_true", help="package the X-Plane 11 aircraft as its own chain in the same release")
+    ap.add_argument("--xp12-root", type=Path, default=DEFAULT_AIRCRAFT.parent.parent, help="X-Plane 12 whose A330 the XP11 .acf patch refers to")
     a = ap.parse_args()
-    if not a.installer.is_file():
+    if a.xp11 and a.aircraft == DEFAULT_AIRCRAFT:
+        a.aircraft = DEFAULT_AIRCRAFT_XP11
+    if not a.xp11 and not a.installer.is_file():
         raise SystemExit(f"{a.installer} not found: build the installer first (distribution/publish.sh does)")
+    suffix, stem = ("-xp11", "fbw-a380x-xp11") if a.xp11 else ("", "fbw-a380x-xp")
+    full_install, patch_install = (INSTALL11, PATCH_INSTALL11) if a.xp11 else (INSTALL, PATCH_INSTALL)
+    takeover = 0 if a.xp11 else 1
 
-    out_dir = ROOT / "dist" / a.version
+    out_dir = ROOT / "dist" / f"{a.version}{suffix}"
     out_dir.mkdir(parents=True, exist_ok=True)
     for old in [*out_dir.glob("*.zip"), *out_dir.glob("livery-*.jpg")]:
         old.unlink()
 
-    extra, sound_step = generated(a.aircraft, a.sound_pack, out_dir / "sound-pack")
+    extra, sound_step = generated(a.aircraft, a.sound_pack, out_dir / "sound-pack", a.xp12_root if a.xp11 else None)
     tree = tree_of(a.aircraft, extra)
     if a.patch_from:
-        prev_tree, prev_manifest = previous(a.patch_from)
+        prev_tree, prev_manifest = previous(a.patch_from, suffix)
         ship = {rel for rel, f in tree.items() if prev_tree.get(rel, {}).get("sha256") != f["sha256"]}
         deleted = sorted(r for r in set(prev_tree) - set(tree) if not r.startswith("liveries/"))
         if not ship and not deleted:
             raise SystemExit(f"nothing changed since {a.patch_from}")
-        kind, install = "patch", dict(PATCH_INSTALL)
+        kind, install = "patch", dict(patch_install)
         if f"{SND}patch" in ship:
-            install["steps"] = install["steps"][:2] + [sound_step] + install["steps"][2:]
+            install["steps"] = install["steps"][:takeover + 1] + [sound_step] + install["steps"][takeover + 1:]
         chain = prev_manifest.get("chain") or [{"version": prev_manifest["version"], "kind": "full", "files": [f for f in prev_manifest["files"] if f.get("component") != "converter"], "deleted": []}]
     else:
-        ship, deleted, kind, install, chain = set(tree), [], "full", dict(INSTALL), []
-        install["steps"] = install["steps"][:3] + [sound_step] + install["steps"][3:]
+        ship, deleted, kind, install, chain = set(tree), [], "full", dict(full_install), []
+        install["steps"] = install["steps"][:takeover + 2] + [sound_step] + install["steps"][takeover + 2:]
 
     parts: list[Path] = []
     z = None
@@ -255,7 +284,7 @@ def main() -> None:
         nonlocal z, size
         if z is not None:
             z.close()
-        path = out_dir / f"fbw-a380x-xp-{a.version}-part{len(parts) + 1}.zip"
+        path = out_dir / f"{stem}-{a.version}-part{len(parts) + 1}.zip"
         parts.append(path)
         z = zipfile.ZipFile(path, "w")
         size = 0
@@ -264,18 +293,23 @@ def main() -> None:
     for lic in ("LICENSE", "COPYING"):
         if (ROOT / lic).exists():
             lz.write_bytes(z, lic, (ROOT / lic).read_bytes())
+    built_from = (
+        "The .acf is built from your own X-Plane 11's Boeing 747-400 and X-Plane 12's Airbus A330-300;\n"
+        "the wing airfoils are X-Plane 11's own.\n"
+    ) if a.xp11 else "The .acf and wing airfoils are built from your own\nX-Plane 12's Airbus A330-300.\n"
     lz.write_bytes(z, "NOTICE.txt", (
-        "A380 for X-Plane 12 (Ported from FBW A380). Free software: GNU GPL v3 (see LICENSE).\n"
+        f"A380 for X-Plane {11 if a.xp11 else 12} (Ported from FBW A380). Free software: GNU GPL v3 (see LICENSE).\n"
         "Built on FlyByWire Simulations' A380X (GPL-3.0 code; original 3D assets CC BY-NC 4.0).\n"
         "Not affiliated with or endorsed by Microsoft, Laminar Research or FlyByWire Simulations.\n"
         "Contains no Microsoft Flight Simulator content. Liveries remain their authors'.\n"
         "Not included, downloaded during installation from their own sites: SASL (1-sim), FTSiM+'s\n"
-        "A380RR_Sp sound pack (Peter Hager demo) and FlyByWire's FCU font. The .acf and wing airfoils are built from your own\n"
-        "X-Plane 12's Airbus A330-300.\n"
-        "Every component's license and notice: THIRD_PARTY_NOTICES.txt in the aircraft folder.\n"
+        "A380RR_Sp sound pack (Peter Hager demo) and FlyByWire's FCU font. "
+        + built_from
+        + "Every component's license and notice: THIRD_PARTY_NOTICES.txt in the aircraft folder.\n"
     ).encode("utf-8"))
     lz.write_bytes(z, "install.json", json.dumps(install, indent=1).encode("utf-8"))
-    lz.write_bytes(z, INSTALLER_IN_ARCHIVE, a.installer.read_bytes())
+    if not a.xp11:
+        lz.write_bytes(z, INSTALLER_IN_ARCHIVE, a.installer.read_bytes())
     for rel, data in extra.items():
         if rel in ship:
             lz.write_bytes(z, f"aircraft/{rel}", data)
@@ -295,7 +329,10 @@ def main() -> None:
     aircraft_files = [{"name": p.name, "size": p.stat().st_size, "sha256": sha256(p), "component": "aircraft"} for p in parts]
     files = list(aircraft_files)
     exe = a.converter / "msfs2xp-aircraft.exe"
-    if exe.is_file():
+    if a.xp11:
+        if a.texture_pack:
+            raise SystemExit("the X-Plane 11 aircraft takes no texture packs")
+    elif exe.is_file():
         conv = out_dir / "converter.zip"
         lz.write_zip(conv, [(f, f.name) for f in sorted(a.converter.iterdir()) if f.is_file()])
         files.append({"name": conv.name, "size": conv.stat().st_size, "sha256": sha256(conv), "component": "converter"})
@@ -325,8 +362,8 @@ def main() -> None:
     manifest = {"version": a.version, "kind": kind, "notes": a.notes, "files": files, "deleted": deleted, "chain": chain}
     if a.patch_from:
         manifest["from"] = a.patch_from
-    (out_dir / "tree.json").write_text(json.dumps(tree, indent=0, sort_keys=True))
-    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=1))
+    (out_dir / f"tree{suffix}.json").write_text(json.dumps(tree, indent=0, sort_keys=True))
+    (out_dir / f"manifest{suffix}.json").write_text(json.dumps(manifest, indent=1))
     total = sum(p.stat().st_size for p in parts)
     print(f"{kind} {a.version}: {len(parts)} parts, {total / 1e6:.1f} MB, {n} of {len(tree)} aircraft files, {len(deleted)} deleted, chain of {len(chain)}")
 

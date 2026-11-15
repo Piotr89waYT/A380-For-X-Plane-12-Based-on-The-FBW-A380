@@ -4,6 +4,7 @@ import { Search, Trash, Download, ArrowRepeat } from 'react-bootstrap-icons';
 import channels from 'common/channels';
 import { Addon } from 'renderer/utils/InstallerConfiguration';
 import { Directories } from 'renderer/utils/Directories';
+import { xplaneSimArgs } from 'renderer/utils/SimManager';
 
 interface Edition {
   file: string;
@@ -142,6 +143,7 @@ export const Liveries: FC<{ addon: Addon }> = ({ addon }) => {
     try {
       const list = (await ipcRenderer.invoke(channels.xplaneEngine.query, [
         'liveries',
+        ...xplaneSimArgs(addon.simulator),
         ...(xplane ? ['--xplane', xplane] : []),
       ])) as LiveryList;
       setData(list);
@@ -149,7 +151,7 @@ export const Liveries: FC<{ addon: Addon }> = ({ addon }) => {
       setData({ liveries: [], installedFolders: [], error: String(e) });
     }
     setLoading(false);
-  }, [xplane]);
+  }, [xplane, addon.simulator]);
 
   useEffect(() => {
     refresh();
@@ -188,7 +190,7 @@ export const Liveries: FC<{ addon: Addon }> = ({ addon }) => {
     xplane &&
     run(
       `${l.id}/${edition}`,
-      ['livery-install', '--xplane', xplane, '--id', l.id, '--edition', edition],
+      ['livery-install', ...xplaneSimArgs(addon.simulator), '--xplane', xplane, '--id', l.id, '--edition', edition],
       `Downloading ${edition}`,
     );
 
@@ -196,7 +198,7 @@ export const Liveries: FC<{ addon: Addon }> = ({ addon }) => {
     xplane &&
     run(
       `${l.id}/${edition}`,
-      ['livery-remove', '--xplane', xplane, '--folder', l.editions[edition].folder],
+      ['livery-remove', ...xplaneSimArgs(addon.simulator), '--xplane', xplane, '--folder', l.editions[edition].folder],
       `Removing ${edition}`,
     );
 

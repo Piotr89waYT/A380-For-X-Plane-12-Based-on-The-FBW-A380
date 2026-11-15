@@ -200,6 +200,28 @@ const schema: Schema<RendererSettings> = {
               },
             },
           },
+          xplane11: {
+            type: 'object',
+            default: {},
+            properties: {
+              enabled: {
+                type: 'boolean',
+                default: xplaneBasePath(11) !== null,
+              },
+              basePath: {
+                type: ['string', 'null'],
+                default: xplaneBasePath(11),
+              },
+              communityPath: {
+                type: ['string', 'null'],
+                default: xplaneAircraftDir(xplaneBasePath(11)),
+              },
+              installPath: {
+                type: ['string', 'null'],
+                default: xplaneAircraftDir(xplaneBasePath(11)),
+              },
+            },
+          },
         },
       },
       separateTempLocation: {

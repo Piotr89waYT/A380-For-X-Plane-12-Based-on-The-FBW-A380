@@ -27,7 +27,7 @@ fn xplane(args: &[String]) -> Option<PathBuf> {
 
 fn usage() -> ! {
     eprintln!(
-        "usage:\n  engine detect\n  engine status [--xplane DIR] [--repo OWNER/NAME]\n  engine install --xplane DIR [--clean] [--cockpit-cap PX] [--textures 2048|4096|8192] [--sasl ZIP] [--sound-pack ZIP] [--converter DIR] [--repo OWNER/NAME]\n  engine uninstall --xplane DIR\n  engine amdb-status\n  engine liveries [--xplane DIR] [--repo OWNER/NAME]\n  engine livery-install --xplane DIR --id ID --edition 2K|4K [--repo OWNER/NAME]\n  engine livery-remove --xplane DIR --folder NAME\n  engine --takeover DIR\n  engine --cockpit-textures PX DIR
+        "usage (any command takes --sim xp11 for the X-Plane 11 aircraft):\n  engine detect\n  engine status [--xplane DIR] [--repo OWNER/NAME]\n  engine install --xplane DIR [--xplane12 DIR] [--clean] [--cockpit-cap PX] [--textures 2048|4096|8192] [--sasl ZIP] [--sound-pack ZIP] [--converter DIR] [--repo OWNER/NAME]\n  engine uninstall --xplane DIR\n  engine amdb-status\n  engine liveries [--xplane DIR] [--repo OWNER/NAME]\n  engine livery-install --xplane DIR --id ID --edition 2K|4K [--repo OWNER/NAME]\n  engine livery-remove --xplane DIR --folder NAME\n  engine --takeover DIR\n  engine --cockpit-textures PX DIR
   engine --all-textures PX DIR"
     );
     std::process::exit(2);
@@ -48,6 +48,7 @@ fn finish(result: Result<String, String>) {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    install::set_xp11(arg(&args, "--sim").or_else(|| std::env::var("FBW_XP_SIM").ok()).is_some_and(|s| s.eq_ignore_ascii_case("xp11")));
     if let Some(i) = args.iter().position(|a| a == "--cockpit-textures") {
         let cap = args.get(i + 1).and_then(|c| c.parse().ok()).unwrap_or(textures::COCKPIT_REDUCED);
         let Some(aircraft) = args.get(i + 2).map(PathBuf::from) else { usage() };
@@ -114,6 +115,7 @@ fn main() {
                 cockpit_cap: arg(&args, "--cockpit-cap").and_then(|c| c.parse().ok()),
                 textures: arg(&args, "--textures").and_then(|c| c.parse().ok()),
                 clean: args.iter().any(|a| a == "--clean"),
+                xplane12: arg(&args, "--xplane12").map(PathBuf::from),
             };
             if !install::run(answers, &ctx()) {
                 std::process::exit(1);

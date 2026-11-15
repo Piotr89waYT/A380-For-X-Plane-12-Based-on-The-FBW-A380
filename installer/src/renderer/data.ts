@@ -258,3 +258,52 @@ export const defaultConfiguration: Configuration = {
     },
   ],
 };
+
+const xp12Addon = defaultConfiguration.publishers[0].addons.find((addon) => addon.key === 'a380x-xplane12');
+
+const xp11Updates =
+  'Updates come from GitHub: once installed, only what changed since your version is downloaded. ' +
+  "SASL is downloaded from 1-sim and FTSiM+'s A380RR_Sp sound pack (Peter Hager demo) from its own link. The .acf is " +
+  "built from your own X-Plane 11's Boeing 747-400 and X-Plane 12's Airbus A330-300, so X-Plane 12 must be installed " +
+  "on this computer too; the wing airfoils are X-Plane 11's own.\n\n";
+
+const xp11Only =
+  '<span class="text-utility-orange">⚠ Only for X-Plane 11. Experimental: X-Plane 11 has no built-in browser, so the ' +
+  'cockpit screens run in the A380 display app next to X-Plane.</span>\n\n';
+
+defaultConfiguration.publishers[0].addons.splice(1, 0, {
+  ...xp12Addon,
+  key: 'a380x-xplane11',
+  simulator: 'xplane11',
+  description: xp12Addon.description.replace('to X-Plane 12', 'to X-Plane 11 and 12'),
+  targetDirectory: 'A380 for X-Plane 11',
+  tracks: [
+    {
+      name: 'Beta (2K)',
+      key: 'a380x-xp11-stable-2k',
+      url: REPO_URL,
+      description:
+        xp11Only +
+        'Every cabin, cockpit and exterior texture downscaled to 2K after the download, for graphics cards with 8 GB ' +
+        'of VRAM or less. Small panel lettering gets a little softer. Going back to 4K downloads the aircraft again.\n\n' +
+        xp11Updates,
+      isExperimental: false,
+      releaseModel: {
+        type: 'xplaneEngine',
+        textures: 2048,
+      },
+    },
+    {
+      name: 'Beta (4K)',
+      key: 'a380x-xp11-stable-4k',
+      url: REPO_URL,
+      description:
+        xp11Only + '4K cabin, cockpit and exterior textures, the largest X-Plane 11 allows.\n\n' + xp11Updates,
+      isExperimental: false,
+      releaseModel: {
+        type: 'xplaneEngine',
+        textures: 4096,
+      },
+    },
+  ],
+});

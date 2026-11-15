@@ -25,7 +25,7 @@ import { ExternalApps } from 'renderer/utils/ExternalApps';
 import { MyInstall } from 'renderer/components/AddonSection/MyInstall';
 import { Liveries } from 'renderer/components/AddonSection/Liveries';
 import rehypeRaw from 'rehype-raw';
-import { Simulators } from 'renderer/utils/SimManager';
+import { isXPlane, Simulators } from 'renderer/utils/SimManager';
 
 const abortControllers = new Array<AbortController>(20);
 abortControllers.fill(new AbortController());
@@ -465,7 +465,7 @@ export const AddonSection = (): JSX.Element => {
                           Settings
                         </SideBarLink>
                       )}
-                      {selectedAddon.simulator === 'xplane12' && selectedAddon.engine !== 'amdb-bridge' && (
+                      {isXPlane(selectedAddon.simulator) && selectedAddon.engine !== 'amdb-bridge' && (
                         <SideBarLink to={`/addon-section/${publisherName}/main/liveries`}>
                           <Palette size={22} />
                           Liveries

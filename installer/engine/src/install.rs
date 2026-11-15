@@ -14,6 +14,7 @@ pub struct Answers {
     pub cockpit_cap: Option<u32>,
     pub textures: Option<u32>,
     pub clean: bool,
+    pub xplane12: Option<PathBuf>,
 }
 
 pub enum Msg {
@@ -97,9 +98,9 @@ pub fn pick_release(releases_json: &str) -> Result<(String, Vec<(String, String)
     let release = releases
         .into_iter()
         .filter(|r| !r.draft)
-        .find(|r| r.assets.iter().any(|a| a.name == "manifest.json"))
-        .ok_or("no release on GitHub has a manifest.json yet")?;
-    let manifest_url = release.assets.iter().find(|a| a.name == "manifest.json").map(|a| a.browser_download_url.clone()).unwrap_or_default();
+        .find(|r| r.assets.iter().any(|a| a.name == manifest_name()))
+        .ok_or_else(|| format!("no release on GitHub has a {} yet", manifest_name()))?;
+    let manifest_url = release.assets.iter().find(|a| a.name == manifest_name()).map(|a| a.browser_download_url.clone()).unwrap_or_default();
     Ok((manifest_url, release.assets.into_iter().map(|a| (a.name, a.browser_download_url)).collect()))
 }
 
@@ -176,7 +177,7 @@ pub fn wipe_traces(xplane: &Path, local_appdata: Option<&Path>, temp: &Path, kee
             Err(e) => Err(format!("could not remove {}: {e}", p.display())),
         }
     };
-    for dir in [AIRCRAFT_DIR, LEGACY_AIRCRAFT_DIR] {
+    for dir in if xp11() { &[AIRCRAFT_DIR_XP11][..] } else { &[AIRCRAFT_DIR, LEGACY_AIRCRAFT_DIR][..] } {
         let updater = xplane.join(dir).join(UPDATER_NAME);
         if updater.exists() {
             let old = xplane.join(OLD_UPDATER);
@@ -229,7 +230,7 @@ pub fn data_home() -> Option<PathBuf> {
 }
 
 fn remembered_path() -> Option<PathBuf> {
-    Some(data_home()?.join("A380 for X-Plane 12").join("installer.json"))
+    Some(data_home()?.join("A380 for X-Plane 12").join(if xp11() { "installer-xp11.json" } else { "installer.json" }))
 }
 
 impl Remembered {
@@ -248,13 +249,37 @@ impl Remembered {
 }
 
 pub(crate) const AIRCRAFT_DIR: &str = "Aircraft/A380 for X-Plane 12";
+const AIRCRAFT_DIR_XP11: &str = "Aircraft/A380 for X-Plane 11";
+
+static XP11: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// X-Plane 11 instead of 12: its own aircraft folder, release files and settings.
+pub fn set_xp11(on: bool) {
+    XP11.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn xp11() -> bool {
+    XP11.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub(crate) fn aircraft_dir() -> &'static str {
+    if xp11() { AIRCRAFT_DIR_XP11 } else { AIRCRAFT_DIR }
+}
+
+fn manifest_name() -> &'static str {
+    if xp11() { "manifest-xp11.json" } else { "manifest.json" }
+}
+
+fn sim_name() -> &'static str {
+    if xp11() { "X-Plane 11" } else { "X-Plane 12" }
+}
 const LEGACY_AIRCRAFT_DIR: &str = "Aircraft/FlyByWire A380X";
 const UPDATER_NAME: &str = "FlyByWire A380X Updater.exe";
 const OLD_UPDATER: &str = "Output/fbw-a380x-updater.old.exe";
 const TAKEOVER: &str = "--takeover";
 
 pub fn installed_version(xplane: &Path) -> Option<String> {
-    std::fs::read_to_string(xplane.join(AIRCRAFT_DIR).join(VERSION_FILE)).ok().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
+    std::fs::read_to_string(xplane.join(aircraft_dir()).join(VERSION_FILE)).ok().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
 }
 
 #[cfg(not(windows))]
@@ -303,7 +328,14 @@ enum Step {
     /// Copy files from the user's own X-Plane into the aircraft folder.
     FromXplane { from: String, files: Vec<String>, to: String },
     /// Build an .acf from the user's own X-Plane aircraft file and the patch of this aircraft's own values.
-    BuildAcf { template: String, patch: String, to: String },
+    BuildAcf {
+        template: String,
+        patch: String,
+        to: String,
+        /// A second template in the user's X-Plane 12, for the X-Plane 11 aircraft.
+        #[serde(default)]
+        xplane12_template: Option<String>,
+    },
     /// Download a file the release does not carry, checked against its SHA-256.
     Download { url: String, sha256: String, to: String },
     /// Install FTSiM+'s A380RR_Sp sound pack (demo, Peter Hager edition), from the user's Downloads or FTSiM+'s own download link: its banks with our dataref names, its GUIDs, and our .snd built on its own.
@@ -378,7 +410,7 @@ pub fn packs_for(textures: u32) -> &'static [&'static str] {
 
 pub fn installed_textures(xplane: &Path) -> Option<u32> {
     installed_version(xplane)?;
-    Some(std::fs::read_to_string(xplane.join(AIRCRAFT_DIR).join(TEXTURES_FILE)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(FULL_TEXTURES))
+    Some(std::fs::read_to_string(xplane.join(aircraft_dir()).join(TEXTURES_FILE)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(FULL_TEXTURES))
 }
 
 fn wanted(f: &ReleaseFile) -> bool {
@@ -410,7 +442,7 @@ fn apply_textures(aircraft: &Path, textures: u32, pack: &[ReleaseFile], dir: &Pa
 }
 
 pub fn uninstall(xplane: &Path, ctx: &Ctx) -> Result<String, String> {
-    if installed_version(xplane).is_none() && !xplane.join(AIRCRAFT_DIR).exists() {
+    if installed_version(xplane).is_none() && !xplane.join(aircraft_dir()).exists() {
         return Ok("The A380X is not installed".to_owned());
     }
     ctx.status("Removing the A380X and every trace of it...");
@@ -420,7 +452,7 @@ pub fn uninstall(xplane: &Path, ctx: &Ctx) -> Result<String, String> {
     for p in &removed {
         ctx.log(format!("Removed {}", p.display()));
     }
-    Ok(format!("Uninstalled the A380X from {}", xplane.join(AIRCRAFT_DIR).display()))
+    Ok(format!("Uninstalled the A380X from {}", xplane.join(aircraft_dir()).display()))
 }
 
 pub struct Ctx {
@@ -482,6 +514,7 @@ pub fn takeover(xplane: PathBuf) -> Result<String, String> {
         cockpit_cap: remembered.cockpit_cap,
         textures: None,
         clean: false,
+        xplane12: None,
     };
     work(&a, &Ctx { json: false })
 }
@@ -496,12 +529,15 @@ fn work(a: &Answers, ctx: &Ctx) -> Result<String, String> {
     }
     let before = installed_version(&a.xplane);
     let have_textures = installed_textures(&a.xplane);
-    let textures = a.textures.unwrap_or(have_textures.unwrap_or(FULL_TEXTURES));
+    let mut textures = a.textures.unwrap_or(have_textures.unwrap_or(FULL_TEXTURES));
+    if xp11() {
+        textures = textures.min(FULL_TEXTURES);
+    }
     let (mut wipe, mut first) = plan(&latest.chain, before.as_deref(), a.clean);
-    let aircraft = a.xplane.join(AIRCRAFT_DIR);
-    let work_root = std::env::temp_dir().join(format!("fbw-a380x-xp-{}", latest.version));
+    let aircraft = a.xplane.join(aircraft_dir());
+    let work_root = std::env::temp_dir().join(format!("fbw-a380x-xp-{}{}", if xp11() { "11-" } else { "" }, latest.version));
     let mut pack: Vec<ReleaseFile> = Vec::new();
-    for component in packs_for(textures) {
+    for component in if xp11() { &[][..] } else { packs_for(textures) } {
         pack.extend(pack_files(&a.repo, &latest, component, |url| github_get(url)?.into_string().map_err(|e| e.to_string()))?);
     }
     if textures > FULL_TEXTURES && !pack.iter().any(|f| f.component == PACK_8K) {
@@ -658,7 +694,7 @@ fn move_entries(from: &Path, to: &Path) -> Result<(), String> {
 
 fn wipe_install(a: &Answers, ctx: &Ctx, work_root: &Path) -> Result<(), String> {
     ctx.status("Removing the old install and every trace of it...");
-    let liveries = a.xplane.join(AIRCRAFT_DIR).join("liveries");
+    let liveries = a.xplane.join(aircraft_dir()).join("liveries");
     let kept = a.xplane.join("Output").join("a380-liveries-kept");
     if liveries.is_dir() {
         move_entries(&liveries, &kept).map_err(|e| format!("could not set the liveries aside: {e}"))?;
@@ -914,12 +950,18 @@ fn run_steps(a: &Answers, ctx: &Ctx, steps: &Steps, release: &Path, aircraft: &P
                 for f in files {
                     let src = a.xplane.join(from).join(f);
                     std::fs::copy(&src, dst.join(f))
-                        .map_err(|e| format!("{}: {e} (this aircraft takes it from your own X-Plane 12)", src.display()))?;
+                        .map_err(|e| format!("{}: {e} (this aircraft takes it from your own {})", src.display(), sim_name()))?;
                 }
             }
-            Step::BuildAcf { template, patch, to } => {
+            Step::BuildAcf { template, patch, to, xplane12_template } => {
                 ctx.status(format!("Building {to} from your X-Plane's {template}..."));
-                let differing = build_acf(&a.xplane.join(template), &aircraft.join(patch), &aircraft.join(to))?;
+                let second = match xplane12_template {
+                    Some(t) => Some(a.xplane12.clone().or_else(|| detect_xplane_version(12)).map(|x| x.join(t)).ok_or_else(|| {
+                        format!("A380 for X-Plane 11 builds {to} from X-Plane 11's {template} and X-Plane 12's {t}, and no X-Plane 12 was found on this computer")
+                    })?),
+                    None => None,
+                };
+                let differing = build_acf(&a.xplane.join(template), second.as_deref(), &aircraft.join(patch), &aircraft.join(to))?;
                 if differing > 0 {
                     ctx.log(format!("{to}: {differing} values in your {template} differ from the X-Plane version this release was made with"));
                 }
@@ -1032,17 +1074,27 @@ fn latin1(bytes: &[u8]) -> String {
     bytes.iter().map(|&b| b as char).collect()
 }
 
-fn build_acf(template: &Path, patch: &Path, out: &Path) -> Result<usize, String> {
-    let base_text = latin1(&std::fs::read(template).map_err(|e| {
-        format!("{}: {e} (this aircraft builds its .acf from your own X-Plane 12's Laminar Research Airbus A330-300)", template.display())
-    })?);
-    let mut base = std::collections::HashMap::new();
-    for line in base_text.split('\n') {
+fn acf_values(text: &str) -> std::collections::HashMap<&str, &str> {
+    let mut out = std::collections::HashMap::new();
+    for line in text.split('\n') {
         if let Some(rest) = line.strip_prefix("P ") {
             let (key, value) = rest.split_once(' ').unwrap_or((rest, ""));
-            base.insert(key, value);
+            out.insert(key, value);
         }
     }
+    out
+}
+
+fn build_acf(template: &Path, second: Option<&Path>, patch: &Path, out: &Path) -> Result<usize, String> {
+    let base_text = latin1(&std::fs::read(template).map_err(|e| {
+        format!("{}: {e} (this aircraft builds its .acf from that file in your own {})", template.display(), sim_name())
+    })?);
+    let base = acf_values(&base_text);
+    let other_text = match second {
+        Some(p) => latin1(&std::fs::read(p).map_err(|e| format!("{}: {e} (A380 for X-Plane 11 also takes values from that file in your X-Plane 12)", p.display()))?),
+        None => String::new(),
+    };
+    let other = acf_values(&other_text);
     let patch_text = latin1(&std::fs::read(patch).map_err(|e| format!("{}: {e}", patch.display()))?);
     let mut lines = patch_text.split('\n');
     if lines.next() != Some(ACF_PATCH_MAGIC) {
@@ -1054,10 +1106,36 @@ fn build_acf(template: &Path, patch: &Path, out: &Path) -> Result<usize, String>
         hex(&Sha256::digest(&raw))[..8].to_ascii_lowercase()
     };
     let mut by_check: Option<std::collections::HashMap<String, &str>> = None;
+    let mut other_by_check: Option<std::collections::HashMap<String, &str>> = None;
     let mut text = String::with_capacity(base_text.len() / 4);
     let mut differing = 0;
     let mut first = true;
     for line in lines {
+        if let Some(rest) = line.strip_prefix('~') {
+            let mut parts = rest.splitn(3, ' ');
+            let (key, src, expected) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+            let value = match other.get(src) {
+                Some(v) if check(v).eq_ignore_ascii_case(expected) => Some(*v),
+                found => {
+                    differing += 1;
+                    let known = other_by_check.get_or_insert_with(|| {
+                        let mut m = std::collections::HashMap::new();
+                        for v in other.values().copied() {
+                            m.entry(check(v)).or_insert(v);
+                        }
+                        m
+                    });
+                    known.get(&expected.to_ascii_lowercase()).copied().or(found.copied())
+                }
+            };
+            let Some(value) = value else { continue };
+            if !first {
+                text.push('\n');
+            }
+            first = false;
+            text.push_str(&format!("P {key} {value}"));
+            continue;
+        }
         let line = match line.strip_prefix('=') {
             Some(rest) => {
                 let (key, expected) = rest.split_once(' ').unwrap_or((rest, ""));
@@ -1406,9 +1484,13 @@ fn run_program(program: &Path, args: &[String], ctx: &Ctx) -> Result<(), String>
 
 // ---- detection ------------------------------------------------------------
 
-/// X-Plane 12's own record of its installs (`%LOCALAPPDATA%\x-plane_install_12.txt`,
-/// one folder per line); the first that exists.
 pub fn detect_xplane() -> Option<PathBuf> {
+    detect_xplane_version(if xp11() { 11 } else { 12 })
+}
+
+/// X-Plane's own record of its installs (`%LOCALAPPDATA%\x-plane_install_12.txt`,
+/// one folder per line); the first that exists.
+pub fn detect_xplane_version(version: u32) -> Option<PathBuf> {
     let record = if cfg!(windows) {
         data_home()?
     } else if cfg!(target_os = "macos") {
@@ -1416,7 +1498,7 @@ pub fn detect_xplane() -> Option<PathBuf> {
     } else {
         PathBuf::from(std::env::var_os("HOME")?).join(".x-plane")
     };
-    let list = std::fs::read_to_string(record.join("x-plane_install_12.txt")).ok()?;
+    let list = std::fs::read_to_string(record.join(format!("x-plane_install_{version}.txt"))).ok()?;
     list.lines().map(|l| PathBuf::from(l.trim())).find(|p| !p.as_os_str().is_empty() && p.join("Aircraft").is_dir())
 }
 
@@ -1645,10 +1727,10 @@ mod tests {
         std::fs::write(&template, "I\n1200 Version\nP a 1\nP b 2\nP c 3\n").unwrap();
         let patch_text = format!("{ACF_PATCH_MAGIC}\nTEMPLATE x\nI\n1200 Version\n={} {}\nP b 5\n=c {}\nP d 9\n", "a", short("1"), short("3"));
         std::fs::write(&patch, patch_text).unwrap();
-        assert_eq!(build_acf(&template, &patch, &out).unwrap(), 0);
+        assert_eq!(build_acf(&template, None, &patch, &out).unwrap(), 0);
         assert_eq!(std::fs::read_to_string(&out).unwrap(), "I\n1200 Version\nP a 1\nP b 5\nP c 3\nP d 9\n");
         std::fs::write(&template, "I\n1200 Version\nP a 1\nP b 2\nP c 4\n").unwrap();
-        assert_eq!(build_acf(&template, &patch, &out).unwrap(), 1);
+        assert_eq!(build_acf(&template, None, &patch, &out).unwrap(), 1);
     }
 
     #[test]
@@ -1667,8 +1749,27 @@ mod tests {
             short("unknowable")
         );
         std::fs::write(&patch, patch_text).unwrap();
-        assert_eq!(build_acf(&template, &patch, &out).unwrap(), 3);
+        assert_eq!(build_acf(&template, None, &patch, &out).unwrap(), 3);
         assert_eq!(std::fs::read_to_string(&out).unwrap(), "I\n1200 Version\nP a 7\nP gone -1\nP lost 7\nP d 9\n");
+    }
+
+    #[test]
+    fn values_from_the_second_template_come_by_key_then_by_check() {
+        let dir = std::env::temp_dir().join("fbw-acf-patch-second-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let (template, second, patch, out) = (dir.join("747.acf"), dir.join("A330.acf"), dir.join("a.acfpatch"), dir.join("a.acf"));
+        std::fs::write(&template, "I\nP a 7\n").unwrap();
+        std::fs::write(&second, "I\nP wing 2.5\nP moved 3.25\n").unwrap();
+        let patch_text = format!(
+            "{ACF_PATCH_MAGIC}\nTEMPLATE x\nI\n=a {}\n~part/8 wing {}\n~part/9 old {}\n~part/10 wing {}\nP d 9\n",
+            short("7"),
+            short("2.5"),
+            short("3.25"),
+            short("unknowable")
+        );
+        std::fs::write(&patch, patch_text).unwrap();
+        assert_eq!(build_acf(&template, Some(&second), &patch, &out).unwrap(), 2);
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), "I\nP a 7\nP part/8 2.5\nP part/9 3.25\nP part/10 2.5\nP d 9\n");
     }
 
     #[test]

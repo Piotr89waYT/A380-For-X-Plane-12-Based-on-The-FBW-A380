@@ -4,7 +4,12 @@ export enum Simulators {
   Msfs2020 = 'msfs2020',
   Msfs2024 = 'msfs2024',
   XPlane12 = 'xplane12',
+  XPlane11 = 'xplane11',
 }
+
+export const isXPlane = (sim: string): boolean => sim === Simulators.XPlane12 || sim === Simulators.XPlane11;
+
+export const xplaneSimArgs = (sim: string): string[] => (sim === Simulators.XPlane11 ? ['--sim', 'xp11'] : []);
 
 export type TypeOfSimulator = `${Simulators}` | Simulators;
 

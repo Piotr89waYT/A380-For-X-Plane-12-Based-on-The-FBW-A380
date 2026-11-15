@@ -139,6 +139,44 @@ const XplaneSettings = (): JSX.Element => {
   );
 };
 
+const Xplane11Settings = (): JSX.Element => {
+  const sim = Simulators.XPlane11;
+  const [enabled, setEnabled] = useSetting<boolean>(`mainSettings.simulator.${sim}.enabled`);
+  const [basePath, setBasePath] = useSetting<string>(`mainSettings.simulator.${sim}.basePath`);
+
+  return (
+    <div className="flex flex-col divide-y divide-gray-600">
+      <SettingsItem name="X-Plane 11">
+        <Toggle
+          value={enabled}
+          onToggle={async () => {
+            if (enabled && Object.values(enabledSimulators()).length < 2) {
+              return;
+            }
+            if (!enabled && !basePath && !(await setupXplanePath(sim))) {
+              return;
+            }
+            setEnabled(!enabled);
+            if (enabled && managedSim() === sim) {
+              setManagedSim(nextSim(sim));
+            }
+          }}
+        />
+      </SettingsItem>
+      {enabled && (
+        <div className="flex flex-col divide-y divide-gray-600 pl-6">
+          <PathSettingItem
+            name="X-Plane 11 Folder"
+            value={basePath}
+            setValue={setBasePath}
+            callback={() => setupXplanePath(sim)}
+          />
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const DownloadSettings = (): JSX.Element => {
   const [separateTempLocation, setSeparateTempLocation] = useSetting<boolean>('mainSettings.separateTempLocation');
   const [disableVersionWarning, setDisableVersionWarning] = useSetting<boolean>(
@@ -152,6 +190,7 @@ export const DownloadSettings = (): JSX.Element => {
         <h2 className="font-manrope font-bold text-white">Download Settings</h2>
         <div className="flex flex-col divide-y divide-gray-600">
           <XplaneSettings />
+          <Xplane11Settings />
           <DisableWarningSettingItem value={disableVersionWarning} setValue={setDisableVersionWarning} />
         </div>
       </div>

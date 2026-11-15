@@ -28,13 +28,18 @@ const possibleBasePaths: Record<TypeOfSimulator, { store: string; steam: string;
     steam: path.join(Directories.home(), '.not-msfs'),
     linuxSteam: path.join(Directories.home(), '.not-msfs'),
   },
+  xplane11: {
+    store: path.join(Directories.home(), '.not-msfs'),
+    steam: path.join(Directories.home(), '.not-msfs'),
+    linuxSteam: path.join(Directories.home(), '.not-msfs'),
+  },
 };
 
 const basePathCache: Record<string, string | null> = {};
 
-export const xplaneBasePath = (): string | null => {
+export const xplaneBasePath = (version: 11 | 12 = 12): string | null => {
   try {
-    const list = fs.readFileSync(path.join(Directories.localAppData(), 'x-plane_install_12.txt')).toString();
+    const list = fs.readFileSync(path.join(Directories.localAppData(), `x-plane_install_${version}.txt`)).toString();
     return (
       list
         .split(/\r?\n/)
@@ -187,11 +192,10 @@ export const setupSimulatorBasePath = async (sim: TypeOfSimulator): Promise<stri
   );
 };
 
-export const setupXplanePath = async (): Promise<string> => {
-  const sim = Simulators.XPlane12;
+export const setupXplanePath = async (sim: TypeOfSimulator = Simulators.XPlane12): Promise<string> => {
   const chosen = await selectPath(
     Directories.simulatorBasePath(sim),
-    'Select your X-Plane 12 folder',
+    `Select your X-Plane ${sim === Simulators.XPlane11 ? 11 : 12} folder`,
     `mainSettings.simulator.${sim}.basePath`,
   );
 

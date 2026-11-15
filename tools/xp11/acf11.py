@@ -32,6 +32,14 @@ STATIC_DEF_AT_MAX_FT = 2.4
 FLAG_XP12_ONLY = 0x2000 | 0x8000
 
 
+# X-Plane 11's own Airfoils library has these; the Airbus ones are the A330's and never ship.
+AIRFOILS = {
+    "Airbus Root (high subsonic).afl": "Boeing Root (high subsonic).afl",
+    "Airbus Mid (high subsonic).afl": "Boeing Mid (high subsonic).afl",
+    "Airbus Tip (high subsonic).afl": "Boeing Tip (high subsonic).afl",
+}
+
+
 def read_acf(path):
     """(header lines, ordered props dict, trailer lines from PROPERTIES_END)."""
     lines = Path(path).read_text(encoding="latin-1").splitlines()
@@ -261,6 +269,9 @@ def convert(p12, donor):
         nk = normalise(k)
         if nk not in have or re.match(r"^acf/_[A-Za-z0-9_]+/\d+$", k):
             out[k] = v
+    for k, v in out.items():
+        if "_afl_file" in k and v in AIRFOILS:
+            out[k] = AIRFOILS[v]
     return out
 
 
