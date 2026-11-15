@@ -309,4 +309,15 @@ if (store.get('mainSettings.installPath')) {
   store.delete('mainSettings.installPath' as keyof RendererSettings);
 }
 
+// Settings saved before X-Plane 11 existed have no xplane11 entry; schema defaults don't fill nested objects.
+if (!store.has('mainSettings.simulator.xplane11.enabled' as keyof RendererSettings)) {
+  const base = xplaneBasePath(11);
+  store.set('mainSettings.simulator.xplane11', {
+    enabled: base !== null,
+    basePath: base,
+    communityPath: xplaneAircraftDir(base),
+    installPath: xplaneAircraftDir(base),
+  });
+}
+
 export default store;
