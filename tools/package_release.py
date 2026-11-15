@@ -101,12 +101,12 @@ BACKUP = re.compile(r"\.(before|with|bak|orig|old)\b|\.(map|log|tmp|pdb)$|~$|_pr
 
 PATCH_INSTALL = {"aircraft": AIRCRAFT_IN_XPLANE, "steps": [TAKEOVER, {"kind": "copy", "from": "aircraft", "to": ""}, *FROM_XPLANE]}
 
-# X-Plane 11: the .acf comes from XP11's 747-400 plus XP12's A330 (both the user's own); XP11's own Boeing airfoils.
+# X-Plane 11: the .acf comes from the user's own XP11 747-400; XP11's own Boeing airfoils; no XP12 needed.
 DEFAULT_AIRCRAFT_XP11 = Path(r"D:\Steam Games\steamapps\common\X-Plane 11\Aircraft\A380 for X-Plane 11")
 AIRCRAFT_IN_XPLANE11 = "Aircraft/A380 for X-Plane 11"
 LAMINAR_747 = "Aircraft/Laminar Research/Boeing B747-400/747-400.acf"
 FROM_XPLANE11 = [
-    *[{"kind": "build_acf", "template": LAMINAR_747, "xplane12_template": f"{LAMINAR_A330}/A330.acf", "patch": acf + "patch", "to": acf} for acf in SHIPPED_ACFS],
+    *[{"kind": "build_acf", "template": LAMINAR_747, "patch": acf + "patch", "to": acf} for acf in SHIPPED_ACFS],
     {"kind": "download", "url": FCU_FONT_URL, "sha256": FCU_FONT_SHA256, "to": FCU_FONT},
 ]
 INSTALL11 = {
@@ -155,7 +155,7 @@ def generated(aircraft: Path, sound_pack: Path, work: Path, xp12_root: Path | No
         raise SystemExit(f"{FCU_FONT} no longer matches FlyByWire's copy at {FCU_FONT_URL}; update the URL and hash")
     acf_patch, spr, text_patch = tool("acf_patch"), tool("sound_pack_release"), tool("text_patch")
     if xp12_root:
-        template, second = aircraft.parent.parent / LAMINAR_747, xp12_root / LAMINAR_A330 / "A330.acf"
+        template, second = aircraft.parent.parent / LAMINAR_747, None
     else:
         template, second = aircraft.parent.parent / LAMINAR_A330 / "A330.acf", None
     out = {f"{acf}patch": acf_patch.make(aircraft / acf, template, second).encode("latin-1") for acf in SHIPPED_ACFS}
@@ -294,7 +294,7 @@ def main() -> None:
         if (ROOT / lic).exists():
             lz.write_bytes(z, lic, (ROOT / lic).read_bytes())
     built_from = (
-        "The .acf is built from your own X-Plane 11's Boeing 747-400 and X-Plane 12's Airbus A330-300;\n"
+        "The .acf is built from your own X-Plane 11's Boeing 747-400;\n"
         "the wing airfoils are X-Plane 11's own.\n"
     ) if a.xp11 else "The .acf and wing airfoils are built from your own\nX-Plane 12's Airbus A330-300.\n"
     lz.write_bytes(z, "NOTICE.txt", (

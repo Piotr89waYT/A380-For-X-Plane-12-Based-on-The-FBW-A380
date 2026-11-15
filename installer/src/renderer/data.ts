@@ -264,8 +264,7 @@ const xp12Addon = defaultConfiguration.publishers[0].addons.find((addon) => addo
 const xp11Updates =
   'Updates come from GitHub: once installed, only what changed since your version is downloaded. ' +
   "SASL is downloaded from 1-sim and FTSiM+'s A380RR_Sp sound pack (Peter Hager demo) from its own link. The .acf is " +
-  "built from your own X-Plane 11's Boeing 747-400 and X-Plane 12's Airbus A330-300, so X-Plane 12 must be installed " +
-  "on this computer too; the wing airfoils are X-Plane 11's own.\n\n";
+  "built from your own X-Plane 11's Boeing 747-400 and the wing airfoils are X-Plane 11's own; X-Plane 12 is not needed.\n\n";
 
 const xp11Only =
   '<span class="text-utility-orange">⚠ Only for X-Plane 11. Experimental: X-Plane 11 has no built-in browser, so the ' +

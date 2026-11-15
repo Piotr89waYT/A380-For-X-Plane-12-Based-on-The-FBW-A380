@@ -1953,7 +1953,8 @@ impl InertialReference {
     const QUICK_REALIGN_AVAILABLE_TIME: Duration = Duration::from_secs(5);
     const QUICK_REALIGN_ALIGN_TIME: Duration = Duration::from_secs(180);
     const ALIGNMENT_VELOCITY_TIME_CONSTANT: Duration = Duration::from_millis(500);
-    const MAX_ALIGNMENT_VELOCITY_FPS: f64 = 0.011;
+    // X-Plane never holds a parked aircraft at exactly zero; 0.3 ft/s still catches a pushback.
+    const MAX_ALIGNMENT_VELOCITY_FPS: f64 = 0.3;
     const MAX_LATITUDE_FOR_ALIGNMENT: f64 = 82.;
 
     fn new(context: &mut InitContext, number: usize) -> Self {
@@ -2142,7 +2143,7 @@ impl InertialReference {
         } else {
             // If we exceeded the max alignment velocity, the alignment is restarted
             if self.is_aligning()
-                && self.body_velocity_filter.output().max() > Self::MAX_ALIGNMENT_VELOCITY_FPS
+                && self.body_velocity_filter.output().amax() > Self::MAX_ALIGNMENT_VELOCITY_FPS
                 && self.excess_motion_inhibit_time.is_none()
             {
                 self.remaining_align_duration = None;
@@ -3908,7 +3909,7 @@ mod tests {
     #[rstest]
     fn adirs_detects_excess_motion_during_alignment() {
         let mut test_bed = all_adirus_unaligned_test_bed_with()
-            .body_lateral_velocity_of(Velocity::new::<foot_per_second>(0.1))
+            .body_lateral_velocity_of(Velocity::new::<foot_per_second>(1.0))
             .ir_mode_selector_set_to(1, InertialReferenceMode::Navigation);
         test_bed.run();
         test_bed.run();
@@ -3924,7 +3925,7 @@ mod tests {
     fn adirs_detects_excess_motion_during_alignment_with_instant_boarding_selected() {
         let mut test_bed = all_adirus_unaligned_test_bed_with()
             .boarding_rate_of(BoardingRate::Instant)
-            .body_lateral_velocity_of(Velocity::new::<foot_per_second>(0.1))
+            .body_lateral_velocity_of(Velocity::new::<foot_per_second>(1.0))
             .ir_mode_selector_set_to(1, InertialReferenceMode::Navigation);
         test_bed.run();
         test_bed.run();
@@ -3940,7 +3941,7 @@ mod tests {
     fn adirs_detects_excess_motion_during_alignment_with_fast_boarding_selected() {
         let mut test_bed = all_adirus_unaligned_test_bed_with()
             .boarding_rate_of(BoardingRate::Fast)
-            .body_lateral_velocity_of(Velocity::new::<foot_per_second>(0.1))
+            .body_lateral_velocity_of(Velocity::new::<foot_per_second>(1.0))
             .ir_mode_selector_set_to(1, InertialReferenceMode::Navigation);
         test_bed.run();
         test_bed.run();
@@ -3957,7 +3958,7 @@ mod tests {
         let mut test_bed = all_adirus_unaligned_test_bed_with()
             .boarding_rate_of(BoardingRate::Instant)
             .boarding_started_of(true)
-            .body_lateral_velocity_of(Velocity::new::<foot_per_second>(0.1))
+            .body_lateral_velocity_of(Velocity::new::<foot_per_second>(1.0))
             .ir_mode_selector_set_to(1, InertialReferenceMode::Navigation);
         test_bed.run();
         test_bed.run();
@@ -3974,7 +3975,7 @@ mod tests {
         let mut test_bed = all_adirus_unaligned_test_bed_with()
             .boarding_rate_of(BoardingRate::Fast)
             .boarding_started_of(true)
-            .body_lateral_velocity_of(Velocity::new::<foot_per_second>(0.1))
+            .body_lateral_velocity_of(Velocity::new::<foot_per_second>(1.0))
             .ir_mode_selector_set_to(1, InertialReferenceMode::Navigation);
         test_bed.run();
         test_bed.run();

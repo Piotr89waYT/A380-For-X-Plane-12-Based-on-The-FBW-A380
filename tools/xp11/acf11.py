@@ -272,7 +272,19 @@ def convert(p12, donor):
     for k, v in out.items():
         if "_afl_file" in k and v in AIRFOILS:
             out[k] = AIRFOILS[v]
+    strip_drawn_geometry(out)
     return out
+
+
+# Plane Maker's drawn wing and speedbrake meshes; ours were the A330's and the OBJs draw the aircraft.
+DRAWN = re.compile(r"^(_part/(\d+)/_geo_xyz/|_sbrk/\d+/(_geo|_nrm|_xyz)/(?!.*count$))")
+
+
+def strip_drawn_geometry(out):
+    for k in out:
+        m = DRAWN.match(k)
+        if m and (m.group(2) is None or WING0 <= int(m.group(2)) < BODY0):
+            out[k] = "0.000000000"
 
 
 def write_acf(path, head, props, tail):
