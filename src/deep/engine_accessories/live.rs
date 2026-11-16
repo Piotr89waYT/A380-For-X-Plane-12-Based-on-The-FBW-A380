@@ -1518,7 +1518,10 @@ impl EngineChain {
         if self.wf_command_kg_s <= 0.0 {
             return 0.0;
         }
-        (self.fmu_state.metered_kg_s - self.wf_command_kg_s).abs() / self.wf_command_kg_s
+        // Against the healthy-valve reference, not the raw command: a command
+        // moving faster than the valve can slew is not a fault (issue #40).
+        let expected = self.fmu_state.expected_kg_s;
+        (self.fmu_state.metered_kg_s - expected).abs() / self.wf_command_kg_s.max(expected)
     }
 
     /// The worst of one bearing's four defect tones, mm/s -- what a

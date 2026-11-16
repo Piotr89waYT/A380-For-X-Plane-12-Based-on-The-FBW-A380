@@ -69,16 +69,21 @@ pub struct FmuState {
     pub valve_area_m2: f64,
     pub differential_pa: f64,
     pub spill_m3_s: f64,
+    /// What a healthy valve (full slew rate, regulated differential, no
+    /// pump limit) would meter this frame: the FADEC's own reference, so a
+    /// valve still slewing toward a moving command is not a metering fault.
+    pub expected_kg_s: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct FuelMeteringUnit {
     valve_area_m2: f64,
+    reference_area_m2: f64,
 }
 
 impl FuelMeteringUnit {
     pub fn new() -> Self {
-        Self { valve_area_m2: 0.0 }
+        Self { valve_area_m2: 0.0, reference_area_m2: 0.0 }
     }
 
     /// One step. `wf_command_kg_s` is the governor's commanded fuel mass
@@ -108,6 +113,9 @@ impl FuelMeteringUnit {
         let error = target_area - self.valve_area_m2;
         self.valve_area_m2 += error.clamp(-max_step, max_step);
         self.valve_area_m2 = self.valve_area_m2.clamp(0.0, AREA_MAX_M2);
+        let healthy_step = SLEW_RATE_M2_S * dt;
+        self.reference_area_m2 += (target_area - self.reference_area_m2).clamp(-healthy_step, healthy_step);
+        self.reference_area_m2 = self.reference_area_m2.clamp(0.0, AREA_MAX_M2);
 
         // Actual flow at the *actual* differential (which may differ from
         // the regulated set point if the spill valve has failed).
@@ -121,6 +129,7 @@ impl FuelMeteringUnit {
             valve_area_m2: self.valve_area_m2,
             differential_pa,
             spill_m3_s,
+            expected_kg_s: self.reference_area_m2 * flow_coeff * FUEL_DENSITY_KG_M3,
         }
     }
 }
@@ -136,6 +145,22 @@ mod tests {
             out = fmu.step(wf, 6.0e6, HP_PUMP_DESIGN_FLOW_M3_S, faults, dt);
         }
         out
+    }
+
+    #[test]
+    fn a_healthy_valve_chasing_a_fast_command_matches_its_reference() {
+        // Issue #40: a command swinging faster than the valve slews left the
+        // metered flow >10% off the command and raised ENG n CTL SYS FAULT.
+        let mut fmu = FuelMeteringUnit::new();
+        settle(&mut fmu, 1.2, &FmuFaults::default(), 5.0);
+        for i in 0..200 {
+            let wf = if (i / 5) % 2 == 0 { 0.8 } else { 1.6 };
+            let s = fmu.step(wf, 6.0e6, HP_PUMP_DESIGN_FLOW_M3_S, &FmuFaults::default(), 0.05);
+            assert!((s.metered_kg_s - s.expected_kg_s).abs() < 1e-9, "step {i}: {s:?}");
+        }
+        let mut stuck = FuelMeteringUnit::new();
+        let s = settle(&mut stuck, 1.2, &FmuFaults { valve_sticking: 0.9, ..Default::default() }, 0.5);
+        assert!(s.expected_kg_s - s.metered_kg_s > 0.1 * 1.2, "a sticking valve must still fall behind its reference: {s:?}");
     }
 
     #[test]
