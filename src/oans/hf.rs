@@ -100,8 +100,7 @@ fn write(path: &Path, text: &str) -> bool {
     }
     let root = if dir.file_name().is_some_and(|n| n == "index") { dir.parent().unwrap_or(dir) } else { dir };
     let _ = std::fs::write(root.join("ATTRIBUTION.txt"), format!("{ATTRIBUTION}\n"));
-    let partial = path.with_extension("part");
-    std::fs::write(&partial, text).is_ok() && std::fs::rename(&partial, path).is_ok()
+    state_snapshot::codec::write_atomic(path, text.as_bytes()).is_ok()
 }
 
 pub fn airport(root: &Path, icao: &str) -> Fetch {

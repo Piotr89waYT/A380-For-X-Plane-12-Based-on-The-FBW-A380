@@ -117,7 +117,7 @@ pub(crate) mod ambient {
 use std::collections::{HashSet, VecDeque};
 use std::ffi::{c_char, c_int, c_void, CString};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -265,6 +265,17 @@ fn screens_disabled() -> bool {
 /// instruments' own 30 Hz. Native screens upload every sim frame. Only a screen whose contents actually changed uploads at all
 /// (rule 6's dirty rectangles), so a static screen still uploads nothing.
 const UPLOAD_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(28);
+/// The NDs' gap: about 15 Hz. Their map moves slowly, and the two of them were
+/// a third of every frame's uploaded pixels. Skipped frames' changes are not
+/// lost: the next upload takes every rectangle changed since the last one.
+const ND_UPLOAD_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(60);
+
+fn upload_min_interval(id: &str) -> std::time::Duration {
+    match id {
+        "SCREEN_DU_NDL" | "SCREEN_DU_NDR" => ND_UPLOAD_MIN_INTERVAL,
+        _ => UPLOAD_MIN_INTERVAL,
+    }
+}
 /// A screen that has waited this long is refreshed even over the budget, so
 /// a big one (the FCU's 2560x1280) never starves.
 const UPLOAD_MAX_WAIT: std::time::Duration = std::time::Duration::from_millis(150);
@@ -1071,7 +1082,7 @@ impl Displays {
             if !self.bridge_active(index) {
                 return why("neither a vector page nor a loaded Chromium view");
             }
-            let Some((w, h)) = self.refresh_bridge(index, &[]) else { return why("the Chromium view has no screen block") };
+            let Some((w, h)) = self.refresh_bridge(index, &[], true) else { return why("the Chromium view has no screen block") };
             let texture = self.bridge.as_ref().and_then(|b| b.screens.get(index)?.as_ref()).map_or(0, |bs| bs.gpu.texture());
             if texture == 0 {
                 return why("the Chromium view has not painted yet");
@@ -1201,7 +1212,7 @@ impl Displays {
     /// Brings a bridge screen's texture up to date with XPHFBW's latest
     /// paint (shared GPU copy, or dirty rectangles within the frame's upload
     /// budget) and returns its size in pixels.
-    fn refresh_bridge(&mut self, index: usize, brightness: &[f32]) -> Option<(u32, u32)> {
+    fn refresh_bridge(&mut self, index: usize, brightness: &[f32], seen: bool) -> Option<(u32, u32)> {
         let def = self.screens[index].def;
         let bridge = self.bridge.as_mut()?;
         let Some(bs) = bridge.screens.get_mut(index)?.as_mut() else { return None };
@@ -1219,7 +1230,8 @@ impl Displays {
         // below) and freeze such a screen on its first frame forever.
         let dark = !brightness.is_empty() && brightness.iter().all(|b| *b <= 0.);
         let due = header.frame.load(Ordering::Relaxed) != bs.last_uploaded
-            && waited >= UPLOAD_MIN_INTERVAL
+            && waited >= upload_min_interval(def.id)
+            && seen
             && !(dark && bs.last_upload_at.is_some());
         let gpu_generation = header.gpu_generation.load(Ordering::Acquire);
         if gpu_generation != 0 && header.gpu_refused.load(Ordering::Relaxed) == 0 {
@@ -1440,7 +1452,10 @@ impl Displays {
         }
         let def = self.screens[index].def;
         let pointer = self.screen_cursor(index);
-        let Some((width, height)) = self.refresh_bridge(index, &brightness) else { return false };
+        // From far outside the flight deck the screen is a few pixels: skip the pixel
+        // upload (about 3 ms a frame for all of them) unless it is in a window.
+        let seen = !crate::flight_deck_view::deck_out_of_sight() || self.panel.target.is_some() || popout::is_shown(self, index) || popout::is_out(self, index);
+        let Some((width, height)) = self.refresh_bridge(index, &brightness, seen) else { return false };
         let Some(bridge) = self.bridge.as_mut() else { return false };
         let Some(Some(bs)) = bridge.screens.get_mut(index) else { return false };
         let (fx, fy) = (width as f32 / def.width.max(1) as f32, height as f32 / def.height.max(1) as f32);
@@ -1682,6 +1697,7 @@ impl Displays {
             release_keyboard("a screen with no keyboard was clicked");
             return;
         }
+        touch_typing(now_ms());
         if COCKPIT_KEYBOARD.swap(screen as isize, Ordering::Relaxed) != screen as isize {
             log(&format!("{id}: typing goes here now (Escape, or a click on another screen, hands the keyboard back to X-Plane)"));
         }
@@ -2511,6 +2527,33 @@ pub fn stop(xplm: &'static Xplm) {
 /// case is nothing focused, and that has to cost nothing.
 static COCKPIT_KEYBOARD: AtomicIsize = AtomicIsize::new(-1);
 
+/// When a screen was last clicked or typed into, in ms since the first call
+/// to [`now_ms`]. After [`TYPING_IDLE_MS`] of nothing the keyboard goes back
+/// to X-Plane, so one click on an OIT cannot leave every keybind dead for the
+/// rest of the flight (there is no callback for a click elsewhere).
+static TYPED_AT_MS: AtomicU64 = AtomicU64::new(0);
+const TYPING_IDLE_MS: u64 = 10_000;
+
+fn now_ms() -> u64 {
+    static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    EPOCH.get_or_init(Instant::now).elapsed().as_millis() as u64
+}
+
+fn touch_typing(now: u64) {
+    TYPED_AT_MS.store(now, Ordering::Relaxed);
+}
+
+/// The screen typing goes to, or -1; a screen left idle too long is
+/// released first.
+fn typing_screen(now: u64) -> isize {
+    let screen = COCKPIT_KEYBOARD.load(Ordering::Relaxed);
+    if screen >= 0 && now.saturating_sub(TYPED_AT_MS.load(Ordering::Relaxed)) >= TYPING_IDLE_MS {
+        release_keyboard("nothing was typed into it for 10 s");
+        return -1;
+    }
+    screen
+}
+
 static EFB_TEXT_FOCUS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static MFD_TEXT_FOCUS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -2595,7 +2638,8 @@ unsafe extern "C" fn key_sniffer(key: c_char, flags: c_int, vkey: c_char, _refco
     if let Some(taken) = crate::browser_screens::sniff_key(key as u8 as u32, vkey as u8 as u32, flags) {
         return if taken { SWALLOW } else { PASS_ON };
     }
-    let screen = COCKPIT_KEYBOARD.load(Ordering::Relaxed);
+    let now = now_ms();
+    let screen = typing_screen(now);
     if screen < 0 {
         return PASS_ON;
     }
@@ -2620,7 +2664,12 @@ unsafe extern "C" fn key_sniffer(key: c_char, flags: c_int, vkey: c_char, _refco
         .ok()
         .flatten()
         .unwrap_or(false);
-    if sent { SWALLOW } else { PASS_ON }
+    if sent {
+        touch_typing(now);
+        SWALLOW
+    } else {
+        PASS_ON
+    }
 }
 
 fn screen_of(refcon: *mut c_void) -> usize {

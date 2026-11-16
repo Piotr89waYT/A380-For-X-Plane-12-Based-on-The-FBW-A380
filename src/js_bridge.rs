@@ -1251,11 +1251,7 @@ impl StoredDataBackend for FlyPadSettings {
             };
             let text = crate::efb::write_ini(values);
             let path = crate::efb::settings_path();
-            if let Some(dir) = path.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            let tmp = path.with_extension("ini.tmp");
-            if let Err(e) = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, &path)) {
+            if let Err(e) = state_snapshot::codec::write_atomic(&path, text.as_bytes()) {
                 crate::log(&format!("js: could not save the flyPad settings: {e}"));
             }
             self.cache = None;

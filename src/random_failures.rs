@@ -165,7 +165,7 @@ pub struct RandomFailures {
 
 impl RandomFailures {
     pub fn new(seed: u64) -> Self {
-        Self { config: Config::default(), rng: Rng::new(seed), components: components(), severity: FailureSeverity::All, app_settings_generation: 0 }
+        Self { config: Config::default(), rng: Rng::new(seed), components: components(), severity: FailureSeverity::All, app_settings_generation: u64::MAX }
     }
 
     pub fn restore(&mut self, config: Config, rng: Rng) {
@@ -386,8 +386,11 @@ mod tests {
         let mut rf = RandomFailures::new(1);
         assert_eq!(rf.config, Config::default());
 
-        // Generation 0 -> 0: RandomFailures::new()'s starting generation is
-        // 0 too, so this is a no-op (matches "nothing reloaded yet").
+        // The first sync always applies, even at generation 0: the EFB
+        // setting beats a config restored from the airframe save.
+        rf.restore(Config { enabled: true, rate_multiplier: 3.0 }, Rng::new(1));
+        rf.sync_from_app_settings(app_settings(false, 1.0), 0);
+        assert_eq!(rf.config, Config::default(), "the EFB's off wins over a saved on");
         rf.sync_from_app_settings(app_settings(true, 5.0), 0);
         assert_eq!(rf.config, Config::default(), "same generation: no resync");
 

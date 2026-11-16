@@ -389,9 +389,7 @@ pub fn load_calibration() {
 pub fn save_calibration(v: &serde_json::Value) -> Result<(), String> {
     let c = Calibration::from_json(v)?;
     if let Some(path) = calibration_path() {
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_string_pretty(&c.to_json()).unwrap_or_default()).map_err(|e| e.to_string())?;
-        std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+        state_snapshot::codec::write_atomic(&path, serde_json::to_string_pretty(&c.to_json()).unwrap_or_default().as_bytes()).map_err(|e| e.to_string())?;
     }
     shared(|s| {
         s.calibration = c;
@@ -484,6 +482,9 @@ pub struct Throttles {
     reversers: [Cockpit; 2],
     /// The hardware throttles (X-Plane's ratios, then the raw axes) when TOGA was latched.
     toga_latch: Option<[f64; 8]>,
+    /// What drove each lever last tick, logged on change (a lever "stuck in CL" shows its source).
+    source: [&'static str; 4],
+    source_quiet: [f64; 4],
     /// Seconds until the cockpit datarefs are looked for again.
     retry: f64,
 }
@@ -528,6 +529,8 @@ impl Throttles {
                 Cockpit::new("fbw/cockpit/LEVER_THROTTLE_3_REVERSE"),
             ],
             toga_latch: None,
+            source: [""; 4],
+            source_quiet: [0.; 4],
             retry: 0.,
         }
     }
@@ -633,6 +636,14 @@ impl Throttles {
             } else {
                 (axis, tla)
             };
+            let source = if dragged { "cockpit drag" } else if toga && reverse & (1 << i) == 0 { "TOGA latch" } else { "hardware" };
+            self.source_quiet[i] -= delta;
+            if source != self.source[i] && self.source_quiet[i] <= 0. {
+                // A mouse drag alternates drag/hardware every tick; one line per 2 s is enough.
+                self.source_quiet[i] = 2.;
+                crate::log(&format!("throttle: lever {} {} -> {source} at TLA {tla:.1} (X-Plane ratio {:.3})", i + 1, self.source[i], ratio[i]));
+                self.source[i] = source;
+            }
             let position = self.lever_table.get(tla);
             out.axis[i] = axis;
             out.angle[i] = tla;

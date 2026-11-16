@@ -51,7 +51,24 @@ use crate::source_patch::SourcePatch;
 const SYSTEMS_HOST: &str = "/Pages/VCockpit/Instruments/A380X/SystemsHost/SystemsHost.js";
 
 pub(crate) fn source_patches() -> Vec<SourcePatch> {
-    vec![ecl_ecp_buttons_are_momentary(), ecl_rudder_trim_neutral_is_signed()]
+    vec![ecl_ecp_buttons_are_momentary(), ecl_to_config_test_reads_the_latched_press(), ecl_rudder_trim_neutral_is_signed()]
+}
+
+/// FwsCore reads the T.O CONFIG button a second time, later in the same
+/// update, and writes `toConfigPulseNode` again from it. Once
+/// [`ecl_ecp_buttons_are_momentary`] zeroes the button on its first read, that
+/// second read is always 0 and its `write(false)` erases the rising edge the
+/// buffer just gave the pulse node, so the T.O CONFIG test never ran. Read the
+/// press latched in `toConfigInputBuffer` instead (reset at the end of the cycle).
+fn ecl_to_config_test_reads_the_latched_press() -> SourcePatch {
+    SourcePatch {
+        path: SYSTEMS_HOST.to_string(),
+        find: r#"this.toConfigTestRaw = Vars.read("L:A32NX_BTN_TOCONFIG", "bool") > 0 && !this.fwsEcpFailed.get();"#.to_string(),
+        replace: "this.toConfigTestRaw = this.toConfigInputBuffer.read() && !this.fwsEcpFailed.get();".to_string(),
+        reason: "the ECP patch zeroes A32NX_BTN_TOCONFIG on its first read, so FwsCore's second \
+                 read of it was always 0 and overwrote the T.O CONFIG pulse; T.O CONFIG did nothing"
+            .to_string(),
+    }
 }
 
 /// The ECAM control panel's pushbuttons, made momentary again, and read under

@@ -559,6 +559,15 @@ fn take_crossfeed_toggles() -> Vec<usize> {
     PENDING_CROSSFEED_TOGGLE.lock().map(|mut p| std::mem::take(&mut *p)).unwrap_or_default()
 }
 
+/// What a cockpit XFEED pushbutton asks for: its valve-switch variable as
+/// the cockpit left it, against the network's own state that `publish`
+/// last wrote there. A difference is a click; the clicked value is the
+/// new selection (a set, not a toggle, so a state restore that writes the
+/// variable and `FUEL CROSSFEED SWITCH:n` together stays consistent).
+fn cockpit_crossfeed_request(cockpit: bool, network: bool) -> Option<bool> {
+    (cockpit != network).then_some(cockpit)
+}
+
 /// The command name `CrossfeedCommands::register` creates and
 /// `study/web.rs`'s doc comment for `"kind":"command"` points at -- the
 /// one name both routes must agree on.
@@ -1296,6 +1305,18 @@ impl Fuel {
     /// (`deep/plugin.rs`), so `deep::fuel`'s shadow ledger and this network
     /// can never disagree about whether the valves are actually open.
     fn crossfeed(&mut self, vars: &mut Vars) {
+        // The overhead XFEED pushbuttons (`a380_cockpit_click.obj`) write
+        // `FUELSYSTEM VALVE SWITCH:46..49` directly, which `publish` overwrites
+        // from the network every tick. So a value that no longer matches the
+        // network is a cockpit click (or a state restore) since the last tick:
+        // take it as the new selection instead of letting `publish` erase it.
+        for i in 0..4 {
+            let Some(n) = self.net.valve_index(&format!("CrossFeedValve{}", i + 1)) else { continue };
+            let Some(id) = n.checked_sub(1).and_then(|k| self.ids.valve_switch.get(k)) else { continue };
+            if let Some(open) = cockpit_crossfeed_request(vars.read(id) != 0., self.net.valve_switch(n)) {
+                vars.write(&self.crossfeed.switch[i], if open { 1. } else { 0. });
+            }
+        }
         for i in take_crossfeed_toggles() {
             if let Some(&id) = self.crossfeed.switch.get(i) {
                 let open = vars.read(&id) != 0.;
@@ -1637,15 +1658,8 @@ impl Fuel {
 /// mid-write, or race a second writer's own temp file of the same name onto
 /// disk half-written before either renames.
 fn write_ini_atomic(path: &Path, gallons: &[f64; 11]) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let tmp = path.with_extension("ini.tmp");
     let text = ini_text(gallons);
-    let write = || -> std::io::Result<()> {
-        std::fs::write(&tmp, text.as_bytes())?;
-        std::fs::rename(&tmp, path)
-    };
+    let write = || state_snapshot::codec::write_atomic(path, text.as_bytes());
     match ini_mutex() {
         Some(m) => m.with(write),
         None => write(),
@@ -2013,6 +2027,20 @@ mod tests {
             names,
             vec!["fbw/fuel/crossfeed/1/toggle", "fbw/fuel/crossfeed/2/toggle", "fbw/fuel/crossfeed/3/toggle", "fbw/fuel/crossfeed/4/toggle"]
         );
+    }
+
+    /// Issue #35: the overhead XFEED buttons toggle `FUELSYSTEM VALVE
+    /// SWITCH:46..49`. A click must become the selection, and an unchanged
+    /// variable must not.
+    #[test]
+    fn an_overhead_xfeed_click_becomes_the_crossfeed_selection() {
+        let net = FuelNetwork::from_cfg(FLIGHT_MODEL_CFG).unwrap();
+        let valves: Vec<_> = (1..=4).map(|i| net.valve_index(&format!("CrossFeedValve{i}"))).collect();
+        assert_eq!(valves, vec![Some(46), Some(47), Some(48), Some(49)], "the cockpit buttons' variables");
+        assert_eq!(cockpit_crossfeed_request(true, false), Some(true), "click on a closed valve opens it");
+        assert_eq!(cockpit_crossfeed_request(false, true), Some(false), "click on an open valve shuts it");
+        assert_eq!(cockpit_crossfeed_request(true, true), None);
+        assert_eq!(cockpit_crossfeed_request(false, false), None);
     }
 
     // A leak/pump-loss failure case: with no driving pressure at all (pump

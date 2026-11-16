@@ -228,10 +228,7 @@ impl LandingReport {
             Err(_) => return,
         };
         if let (Some(p), Ok(text)) = (path(), serde_json::to_string_pretty(&list)) {
-            let tmp = p.with_extension("json.tmp");
-            if std::fs::write(&tmp, text).is_ok() {
-                let _ = std::fs::rename(&tmp, &p);
-            }
+            let _ = state_snapshot::codec::write_atomic(&p, text.as_bytes());
         }
     }
 }

@@ -61,6 +61,32 @@ pub fn stop() {
     RUNNING.store(false, Ordering::Relaxed);
 }
 
+/// Only this machine's own pages may use the server: otherwise any website
+/// the user has open could fail engines, load states or borrow the
+/// Navigraph login. No `Origin` means a non-browser client or a same-origin
+/// GET; the `Host` check stops DNS rebinding (a site pointing its own name
+/// at 127.0.0.1).
+fn from_this_machine(head: &str) -> bool {
+    let header = |name: &str| {
+        head.lines().skip(1).find_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            k.trim().eq_ignore_ascii_case(name).then(|| v.trim().to_ascii_lowercase())
+        })
+    };
+    let local = |host_port: &str| {
+        let host = host_port.rsplit_once(':').map_or(host_port, |(h, _)| h);
+        matches!(host, "127.0.0.1" | "localhost" | "[::1]") || host.ends_with(".localhost")
+    };
+    let host_ok = header("host").is_none_or(|h| local(&h));
+    let origin_ok = header("origin")
+        .is_none_or(|o| o.starts_with("coui://") || o.starts_with("xphfbw://") || o.strip_prefix("http://").is_some_and(local));
+    host_ok && origin_ok
+}
+
+/// The largest request read: an OIT export (512 KB of text, JSON-escaped)
+/// is the biggest real body. Anything larger would only grow memory.
+const MAX_REQUEST: usize = 4 * 1024 * 1024;
+
 fn serve(mut stream: TcpStream) -> std::io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_millis(250)))?;
     stream.set_nodelay(true)?;
@@ -79,6 +105,9 @@ fn serve(mut stream: TcpStream) -> std::io::Result<()> {
             break Some(at);
         }
         if total == buf.len() {
+            if buf.len() >= MAX_REQUEST {
+                return reply(&mut stream, 413, "application/json", b"{\"error\":\"request too large\"}");
+            }
             buf.resize(buf.len() * 2, 0);
         }
     };
@@ -96,10 +125,17 @@ fn serve(mut stream: TcpStream) -> std::io::Result<()> {
         .find_map(|l| l.to_ascii_lowercase().starts_with("content-length:").then(|| l["content-length:".len()..].trim().parse().ok()).flatten())
         .unwrap_or(0);
 
+    if !from_this_machine(&head) {
+        crate::diag::event("panel-refused", request_line);
+        return reply(&mut stream, 403, "application/json", b"{\"error\":\"forbidden origin\"}");
+    }
     if method.eq_ignore_ascii_case("OPTIONS") {
         return reply_headers(&mut stream, 204, "text/plain", b"");
     }
 
+    if content_length > MAX_REQUEST {
+        return reply(&mut stream, 413, "application/json", b"{\"error\":\"request too large\"}");
+    }
     let body_start = header_end + 4;
     let mut body = buf[body_start..total].to_vec();
     while body.len() < content_length {
@@ -354,6 +390,7 @@ fn reply_headers(stream: &mut TcpStream, status: u16, kind: &str, body: &[u8]) -
         401 => "Unauthorized",
         403 => "Forbidden",
         404 => "Not Found",
+        413 => "Payload Too Large",
         502 => "Bad Gateway",
         503 => "Service Unavailable",
         504 => "Gateway Timeout",
@@ -423,9 +460,8 @@ fn variables_as_json(only: Option<Vec<String>>) -> String {
             out.push(',');
         }
         *first = false;
-        out.push('"');
-        out.push_str(name);
-        out.push_str("\":");
+        out.push_str(&json_string(name));
+        out.push(':');
         if value.is_finite() {
             let _ = std::fmt::Write::write_fmt(out, format_args!("{value:.4}"));
         } else {
@@ -449,4 +485,28 @@ fn variables_as_json(only: Option<Vec<String>>) -> String {
     }
     out.push_str("}}");
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{from_this_machine, json_string};
+
+    /// Audit C9: a variable name with a quote or control character must not break the /vars JSON.
+    #[test]
+    fn variable_names_are_escaped_in_the_json() {
+        assert_eq!(json_string("A\"B\\C\n\u{1}"), r#""A\"B\\C\n\u0001""#);
+    }
+
+    #[test]
+    fn only_this_machines_pages_may_use_the_server() {
+        let req = |extra: &str| format!("POST /study/action HTTP/1.1\r\nHost: 127.0.0.1:8390\r\n{extra}");
+        assert!(from_this_machine(&req("")), "no Origin: a local tool or same-origin GET");
+        assert!(from_this_machine(&req("Origin: http://127.0.0.1:8390")));
+        assert!(from_this_machine(&req("Origin: http://s3.localhost:51234")), "X-Plane browser screens");
+        assert!(from_this_machine(&req("Origin: coui://html_ui")), "XPHFBW views");
+        assert!(!from_this_machine(&req("Origin: https://evil.example")));
+        assert!(!from_this_machine(&req("Origin: http://127.0.0.1.evil.example")));
+        assert!(!from_this_machine(&req("Origin: null")));
+        assert!(!from_this_machine("GET /vars HTTP/1.1\r\nHost: evil.example:8390"), "DNS rebinding");
+    }
 }

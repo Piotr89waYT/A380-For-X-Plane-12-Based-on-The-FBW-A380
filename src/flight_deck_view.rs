@@ -15,7 +15,7 @@
 //! `fbw/anim/deck_far`: the same beyond `DECK_FAR_RANGE_M`, where the rest of the
 //! flight deck behind the windscreen is a few pixels and is skipped too.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::OnceLock;
 
 use crate::xp::{DataRef, Xplm};
@@ -31,38 +31,49 @@ static CABIN_HIDDEN: AtomicBool = AtomicBool::new(false);
 static DECK_UNSEEN: AtomicBool = AtomicBool::new(false);
 static DECK_FAR: AtomicBool = AtomicBool::new(false);
 static REGISTERED: AtomicBool = AtomicBool::new(false);
+static FRAMES: AtomicU32 = AtomicU32::new(0);
+static DECK_FRAMES: AtomicU32 = AtomicU32::new(0);
+static CABIN_FRAMES: AtomicU32 = AtomicU32::new(0);
+/// Model hiding is off for now: every hide dataref reads 0 so nothing is skipped.
+/// The eye/deck state is still worked out for the screens and the perf log.
+const HIDE_MODELS: bool = false;
+
+fn shown(flag: &AtomicBool) -> bool {
+    HIDE_MODELS && flag.load(Ordering::Relaxed)
+}
+
 static NAMES: OnceLock<[std::ffi::CString; 4]> = OnceLock::new();
 
 unsafe extern "C" fn in_deck_f(_refcon: *mut std::ffi::c_void) -> f32 {
-    IN_FLIGHT_DECK.load(Ordering::Relaxed) as i32 as f32
+    shown(&IN_FLIGHT_DECK) as i32 as f32
 }
 
 unsafe extern "C" fn in_deck_i(_refcon: *mut std::ffi::c_void) -> std::ffi::c_int {
-    IN_FLIGHT_DECK.load(Ordering::Relaxed) as std::ffi::c_int
+    shown(&IN_FLIGHT_DECK) as std::ffi::c_int
 }
 
 unsafe extern "C" fn cabin_f(_refcon: *mut std::ffi::c_void) -> f32 {
-    CABIN_HIDDEN.load(Ordering::Relaxed) as i32 as f32
+    shown(&CABIN_HIDDEN) as i32 as f32
 }
 
 unsafe extern "C" fn cabin_i(_refcon: *mut std::ffi::c_void) -> std::ffi::c_int {
-    CABIN_HIDDEN.load(Ordering::Relaxed) as std::ffi::c_int
+    shown(&CABIN_HIDDEN) as std::ffi::c_int
 }
 
 unsafe extern "C" fn unseen_f(_refcon: *mut std::ffi::c_void) -> f32 {
-    DECK_UNSEEN.load(Ordering::Relaxed) as i32 as f32
+    shown(&DECK_UNSEEN) as i32 as f32
 }
 
 unsafe extern "C" fn unseen_i(_refcon: *mut std::ffi::c_void) -> std::ffi::c_int {
-    DECK_UNSEEN.load(Ordering::Relaxed) as std::ffi::c_int
+    shown(&DECK_UNSEEN) as std::ffi::c_int
 }
 
 unsafe extern "C" fn far_f(_refcon: *mut std::ffi::c_void) -> f32 {
-    DECK_FAR.load(Ordering::Relaxed) as i32 as f32
+    shown(&DECK_FAR) as i32 as f32
 }
 
 unsafe extern "C" fn far_i(_refcon: *mut std::ffi::c_void) -> std::ffi::c_int {
-    DECK_FAR.load(Ordering::Relaxed) as std::ffi::c_int
+    shown(&DECK_FAR) as std::ffi::c_int
 }
 
 /// Publishes the datarefs; called from `XPluginEnable` so they exist before
@@ -99,9 +110,29 @@ pub fn forget() {
     DECK_FAR.store(false, Ordering::Relaxed);
 }
 
+/// Whether the eye is far enough from the flight deck that its screens are a few
+/// pixels at most, as last published.
+pub fn deck_out_of_sight() -> bool {
+    DECK_UNSEEN.load(Ordering::Relaxed)
+}
+
 /// Whether the eye is in the flight deck, as last published.
 pub fn eye_in_flight_deck() -> bool {
     IN_FLIGHT_DECK.load(Ordering::Relaxed)
+}
+
+/// For the perf log: the share of frames since the last call with the eye in the
+/// flight deck and with the cabin hidden, so a slow report can be matched to the view.
+pub fn take_view_share() -> String {
+    share_text(FRAMES.swap(0, Ordering::Relaxed), DECK_FRAMES.swap(0, Ordering::Relaxed), CABIN_FRAMES.swap(0, Ordering::Relaxed))
+}
+
+fn share_text(frames: u32, deck: u32, cabin: u32) -> String {
+    if frames == 0 {
+        return "view unknown".into();
+    }
+    let pct = |n: u32| n as f64 * 100. / frames as f64;
+    format!("eye in flight deck {:.0}% of frames, cabin hidden {:.0}%", pct(deck), pct(cabin))
 }
 
 fn in_flight_deck(inside: bool, head_z: f32, default_eye_z: Option<f32>) -> bool {
@@ -158,8 +189,12 @@ impl FlightDeckView {
             self.door = Some(xplm.find(DOOR));
         }
         let door = self.door.flatten().map(|d| xplm.get_f(d));
+        let cabin = cabin_hidden(deck, door);
         IN_FLIGHT_DECK.store(deck, Ordering::Relaxed);
-        CABIN_HIDDEN.store(cabin_hidden(deck, door), Ordering::Relaxed);
+        CABIN_HIDDEN.store(cabin, Ordering::Relaxed);
+        FRAMES.fetch_add(1, Ordering::Relaxed);
+        DECK_FRAMES.fetch_add(deck as u32, Ordering::Relaxed);
+        CABIN_FRAMES.fetch_add(cabin as u32, Ordering::Relaxed);
         let refs = *self.camera.get_or_insert_with(|| {
             [
                 "sim/graphics/view/view_x",
@@ -195,7 +230,13 @@ impl FlightDeckView {
 
 #[cfg(test)]
 mod tests {
-    use super::{cabin_hidden, deck_beyond, deck_point, deck_unseen, in_flight_deck, DECK_FAR_RANGE_M};
+    use super::{cabin_hidden, deck_beyond, deck_point, deck_unseen, in_flight_deck, share_text, DECK_FAR_RANGE_M};
+
+    #[test]
+    fn the_perf_log_reports_the_share_of_frames_in_the_flight_deck() {
+        assert_eq!(share_text(0, 0, 0), "view unknown");
+        assert_eq!(share_text(300, 300, 150), "eye in flight deck 100% of frames, cabin hidden 50%");
+    }
 
     #[test]
     fn the_deck_point_sits_ahead_of_the_aircraft_along_its_heading() {

@@ -213,12 +213,7 @@ impl Store {
     }
 
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, self.to_text())?;
-        std::fs::rename(tmp, path)
+        state_snapshot::codec::write_atomic(path, self.to_text().as_bytes())
     }
 
     /// Records where a window is now. A window put back in the cockpit keeps

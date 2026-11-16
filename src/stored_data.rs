@@ -25,13 +25,8 @@ fn read_json(path: &Path) -> Map<String, Value> {
 }
 
 fn write_json(path: &Path, map: &Map<String, Value>) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
     let text = serde_json::to_string_pretty(&Value::Object(map.clone())).unwrap_or_else(|_| "{}".to_string());
-    let partial = path.with_extension("json.part");
-    std::fs::write(&partial, text)?;
-    std::fs::rename(&partial, path)
+    state_snapshot::codec::write_atomic(path, text.as_bytes())
 }
 
 /// `op` is `"get"`, `"set"`, `"delete"` or `"search"` (`key` a prefix,

@@ -157,7 +157,7 @@ pub fn end_frame() {
             screens.sort_by(|a, b| b.1.cmp(&a.1));
             let screens: Vec<String> = screens.iter().take(6).map(|(id, b)| format!("{} {:.1}", id.trim_start_matches("SCREEN_"), *b as f64 / frames / 1_048_576.)).collect();
             let reads = DATAREF_READS.swap(0, std::sync::atomic::Ordering::Relaxed) as f64 / frames;
-            crate::log(&format!("perf: {}; {fps:.1} plugin frames/s, {sum:.2} ms per frame in the plugin, {reads:.0} reads of our datarefs per frame, {mb:.1} MB of screen pixels uploaded per frame ({}); ms per frame: {}", sim_report(), screens.join(", "), top.join(", ")));
+            crate::log(&format!("perf: {}, {}; {fps:.1} plugin frames/s, {sum:.2} ms per frame in the plugin, {reads:.0} reads of our datarefs per frame, {mb:.1} MB of screen pixels uploaded per frame ({}); ms per frame: {}", sim_report(), crate::flight_deck_view::take_view_share(), screens.join(", "), top.join(", ")));
             l.frames = 0;
             l.since = Instant::now();
         }

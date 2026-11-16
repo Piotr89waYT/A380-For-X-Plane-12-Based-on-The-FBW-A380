@@ -13,6 +13,7 @@ pub fn auto_signs_on(n1_pct: [f64; 4], slats_deg: [f64; 2], gear_downlocked: [bo
 
 pub struct SeatBeltSigns {
     switch: Option<DataRef>,
+    native: Option<DataRef>,
     alert: VariableIdentifier,
     alert_1: VariableIdentifier,
     n1: [VariableIdentifier; 4],
@@ -24,6 +25,7 @@ impl SeatBeltSigns {
     pub fn new(vars: &mut Vars, xplm: &Xplm) -> Self {
         Self {
             switch: xplm.find("fbw/cockpit/SWITCH_OVHD_INTLT_SEATBELT"),
+            native: xplm.find("sim/cockpit2/switches/fasten_seat_belts"),
             alert: vars.get("CABIN SEATBELTS ALERT SWITCH".into()),
             alert_1: vars.get("CABIN SEATBELTS ALERT SWITCH:1".into()),
             n1: std::array::from_fn(|i| vars.get(format!("ENGINE_N1:{}", i + 1))),
@@ -38,8 +40,18 @@ impl SeatBeltSigns {
     }
 
     pub fn update(&mut self, vars: &mut Vars, xplm: &Xplm) {
+        self.hold_auto(vars, xplm);
         let sign = vars.read(&self.alert);
         vars.write(&self.alert_1, sign);
+        // X-Plane's own sign: what Self-Loading Cargo (via SLCSeatbelts.lua) and other add-ons read.
+        if let Some(native) = self.native {
+            if xplm.get_i(native) != sign as i32 {
+                xplm.set_i(native, sign as i32);
+            }
+        }
+    }
+
+    fn hold_auto(&mut self, vars: &mut Vars, xplm: &Xplm) {
         if self.switch.is_none() {
             self.switch = xplm.find("fbw/cockpit/SWITCH_OVHD_INTLT_SEATBELT");
         }

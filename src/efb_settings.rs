@@ -28,13 +28,8 @@ fn read_json(path: &Path) -> Map<String, Value> {
 }
 
 fn write_json(path: &Path, map: &Map<String, Value>) -> Result<(), String> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    }
     let text = serde_json::to_string_pretty(&Value::Object(map.clone())).map_err(|e| e.to_string())?;
-    let partial = path.with_extension("json.part");
-    std::fs::write(&partial, text).map_err(|e| e.to_string())?;
-    std::fs::rename(&partial, path).map_err(|e| e.to_string())
+    state_snapshot::codec::write_atomic(path, text.as_bytes()).map_err(|e| e.to_string())
 }
 
 /// Every stored setting, by the key the page uses.
@@ -101,10 +96,8 @@ fn save_locked(root: &Path, values: &Map<String, Value>) -> Result<(), String> {
         write_json(&files::datastore_path(root), &datastore)?;
     }
     if ini_changed {
-        if let Some(dir) = ini_path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        }
-        std::fs::write(&ini_path, files::write_ini(&ini)).map_err(|e| e.to_string())?;
+        // Temp file + rename (creates the folder too), so a crash mid-write cannot leave it empty.
+        state_snapshot::codec::write_atomic(&ini_path, files::write_ini(&ini).as_bytes()).map_err(|e| e.to_string())?;
     }
     if app_changed {
         write_json(&files::app_settings_path(root), &app)?;

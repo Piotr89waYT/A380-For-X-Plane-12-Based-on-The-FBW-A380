@@ -124,10 +124,7 @@ fn update() {
     if !changed(&installed, &body) {
         return;
     }
-    let tmp = dir.join(format!("{PACK_FILE}.part"));
-    let written = std::fs::create_dir_all(&dir)
-        .and_then(|_| std::fs::write(&tmp, body.as_bytes()))
-        .and_then(|_| std::fs::rename(&tmp, dir.join(PACK_FILE)));
+    let written = state_snapshot::codec::write_atomic(&dir.join(PACK_FILE), body.as_bytes());
     match written {
         Ok(()) => crate::log(&format!("procedure pack: updated, {} procedures", entries(&body).len())),
         Err(e) => crate::log(&format!("procedure pack: could not save it ({e})")),

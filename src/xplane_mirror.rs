@@ -45,8 +45,8 @@
 //! | `sim/cockpit2/autopilot/vvi_dial_fpm` | `A32NX_AUTOPILOT_VS_SELECTED` | 0 while in FPA mode (FlyByWire's own convention) |
 //! | `sim/cockpit2/autopilot/fpa` | `A32NX_AUTOPILOT_FPA_SELECTED` | 0 while in VS mode |
 //! | `sim/cockpit2/autopilot/trk_fpa` | `A32NX_TRK_FPA_MODE_ACTIVE` | direct, 0=HDG/VS 1=TRK/FPA (X-Plane's own enum matches FlyByWire's) |
-//! | `sim/cockpit2/autopilot/flight_director_mode` | `A32NX_AUTOPILOT_1/2_ACTIVE`, `A32NX_FCU_FD_LIGHT_ON` | [`flight_director_mode`]: 2 with AP, 1 with FD only, 0 otherwise |
-//! | `sim/cockpit2/autopilot/autothrottle_enabled` | `A32NX_AUTOTHRUST_STATUS` | [`autothrottle_enum`]: -1 off, 0 armed, 1 engaged (X-Plane's enum is coarser than the A380's own ATHR status) |
+//! | `sim/cockpit2/autopilot/flight_director_mode` | `A32NX_AUTOPILOT_1/2_ACTIVE`, `A32NX_FCU_FD_LIGHT_ON` | [`flight_director_mode`]: 1 with AP or FD, 0 otherwise (2 would engage X-Plane's own autopilot) |
+//! | `sim/cockpit2/autopilot/autothrottle_enabled` | `A32NX_AUTOTHRUST_STATUS` | [`autothrottle_enum`]: -1 off, 0 armed or engaged (X-Plane's 1 would engage its own autothrottle and freeze the hardware throttle) |
 //! | `sim/cockpit2/annunciators/plugin_master_warning` | `A32NX_MASTER_WARNING` | the SDK's plugin-owned trigger path, not the read-only `master_warning` itself |
 //! | `sim/cockpit2/annunciators/plugin_master_caution` | `A32NX_MASTER_CAUTION` | ditto |
 //!
@@ -207,28 +207,20 @@ fn from_dash_sentinel(value: f64) -> Option<f64> {
     (value >= 0.).then_some(value)
 }
 
-/// `sim/cockpit2/autopilot/flight_director_mode`'s own enum (0 off, 1 on,
-/// 2 on with autopilot servos) from FlyByWire's AP/FD engagement.
+/// `sim/cockpit2/autopilot/flight_director_mode` (0 off, 1 on) from FlyByWire's AP/FD engagement.
+/// Never 2: that engages X-Plane's own autopilot servos, which FlyByWire keeps off.
 fn flight_director_mode(ap_active: bool, fd_light_on: bool) -> i32 {
-    if ap_active {
-        2
-    } else if fd_light_on {
-        1
-    } else {
-        0
-    }
+    (ap_active || fd_light_on) as i32
 }
 
 /// `sim/cockpit2/autopilot/autothrottle_enabled`'s enum, collapsed from
 /// FlyByWire's own three-valued `A32NX_AUTOTHRUST_STATUS` (0 off, 1 armed,
 /// 2 engaged+active — `prim.rs`'s own test comments) into X-Plane's coarser
-/// -1/0/1 (hard off / armed / a generic "engaged" value): X-Plane's enum has
-/// no equivalent of the A380's own THR/SPEED/MCT submodes to select among,
-/// so `1` (airspeed hold) stands in for "engaged" generically.
+/// -1/0 (hard off / armed): engaged also reads as armed, see below.
 fn autothrottle_enum(status: f64) -> i32 {
-    if status >= 2.0 {
-        1
-    } else if status >= 1.0 {
+    // Never 1+: that engages X-Plane's own speed-hold autothrottle, which takes the
+    // throttle handle and stops the hardware throttle axis moving it (levers stuck in CL).
+    if status >= 1.0 {
         0
     } else {
         -1
@@ -311,19 +303,19 @@ mod tests {
     }
 
     #[test]
-    fn flight_director_mode_prefers_autopilot_over_fd_light() {
+    fn flight_director_mode_never_engages_xplanes_servos() {
         assert_eq!(flight_director_mode(false, false), 0);
         assert_eq!(flight_director_mode(false, true), 1);
-        assert_eq!(flight_director_mode(true, false), 2);
-        assert_eq!(flight_director_mode(true, true), 2);
+        assert_eq!(flight_director_mode(true, false), 1, "AP must not engage X-Plane's own servos");
+        assert_eq!(flight_director_mode(true, true), 1);
     }
 
     #[test]
     fn autothrottle_enum_matches_xplanes_coarser_scale() {
         assert_eq!(autothrottle_enum(0.), -1);
         assert_eq!(autothrottle_enum(1.), 0);
-        assert_eq!(autothrottle_enum(2.), 1);
-        assert_eq!(autothrottle_enum(3.), 1, "anything at or above engaged reads as engaged");
+        assert_eq!(autothrottle_enum(2.), 0, "engaged must not engage X-Plane's own autothrottle");
+        assert_eq!(autothrottle_enum(3.), 0);
     }
 
     #[test]

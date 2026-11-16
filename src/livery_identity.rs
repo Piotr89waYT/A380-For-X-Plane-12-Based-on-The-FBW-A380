@@ -173,12 +173,7 @@ pub fn publish() {
             }
         }
         if changed {
-            if let Some(dir) = path.parent() {
-                std::fs::create_dir_all(dir)?;
-            }
-            let partial = path.with_extension("json.part");
-            std::fs::write(&partial, serde_json::to_string_pretty(&Value::Object(on_disk)).unwrap_or_default())?;
-            std::fs::rename(&partial, &path)?;
+            state_snapshot::codec::write_atomic(&path, serde_json::to_string_pretty(&Value::Object(on_disk)).unwrap_or_default().as_bytes())?;
         }
         Ok::<(), std::io::Error>(())
     });

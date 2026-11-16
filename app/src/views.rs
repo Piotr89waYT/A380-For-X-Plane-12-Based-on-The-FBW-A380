@@ -1186,15 +1186,15 @@ wrap_load_handler! {
 /// How often the governor measures X-Plane's frame rate, ms.
 const GOVERNOR_PERIOD_MS: i64 = 1000;
 /// The screens whose picture moves every frame in flight (attitude, speed
-/// and altitude tapes, a rotating map). They get the full governed rate;
-/// every other view (engine and system pages, MFD, OIT, EFB, RMPs, clock)
-/// gets half of it.
+/// and altitude tapes, a rotating map). Every view gets the same governed
+/// rate today (`governed_rates`), so the list changes nothing at the moment.
 const SMOOTH_SCREENS: &[&str] = &["SCREEN_DU_PFDL", "SCREEN_DU_PFDR", "SCREEN_ISIS_1"];
 
 fn governed_rates(sim_fps: f64, cap: i32) -> (i32, i32) {
     let cap = cap.clamp(1, 60);
     let shown = if sim_fps.is_finite() && sim_fps > 0. { ((sim_fps * 1.1).ceil() as i32).clamp(10, 60) } else { cap };
     let rate = shown.min(cap);
+    // Every view at the full rate: halving the others added a frame of click-to-screen lag.
     (rate, rate)
 }
 
@@ -1569,6 +1569,7 @@ mod governor_tests {
         assert_eq!(governed_rates(0., 30), (30, 30));
         assert_eq!(governed_rates(40., 30), (30, 30));
         assert_eq!(governed_rates(5., 60), (10, 10));
+        assert_eq!(governed_rates(30., 5), (5, 5), "a cap under 10 is never raised");
     }
 
     #[test]

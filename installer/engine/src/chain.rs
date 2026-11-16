@@ -72,7 +72,7 @@ pub fn members(size: u64, fetch: &dyn Fn(u64, u64) -> Result<Vec<u8>, String>) -
     let at = (0..tail.len().saturating_sub(21)).rev().find(|&i| u32_at(&tail, i) == Some(EOCD)).ok_or("no end of central directory")?;
     let dir_size = u32_at(&tail, at + 12).ok_or("short end record")? as u64;
     let dir_start = u32_at(&tail, at + 16).ok_or("short end record")? as u64;
-    let dir = if dir_start >= tail_start { tail[(dir_start - tail_start) as usize..(dir_start - tail_start + dir_size) as usize].to_vec() } else { fetch(dir_start, dir_start + dir_size)? };
+    let dir = if dir_start >= tail_start { tail.get((dir_start - tail_start) as usize..(dir_start - tail_start + dir_size) as usize).ok_or("short central directory")?.to_vec() } else { fetch(dir_start, dir_start + dir_size)? };
     let mut out = Vec::new();
     let mut i = 0;
     while u32_at(&dir, i) == Some(CENTRAL) {
@@ -84,6 +84,9 @@ pub fn members(size: u64, fetch: &dyn Fn(u64, u64) -> Result<Vec<u8>, String>) -
         let name = String::from_utf8_lossy(dir.get(i + 46..i + 46 + n).ok_or("short directory")?).replace('\\', "/");
         out.push(Member { name, offset, end: 0, compressed, method, crc });
         i += 46 + n + e + c;
+    }
+    if out.is_empty() {
+        return Err("empty or unreadable central directory".into());
     }
     out.sort_by_key(|m| m.offset);
     for k in 0..out.len() {
@@ -176,5 +179,24 @@ mod tests {
         let x = &list[1];
         let body = extract(&fetch(x.offset, x.end).unwrap(), x).unwrap();
         assert_eq!(body, "VT 1 2 3\n".repeat(2000).as_bytes());
+    }
+
+    /// Audit C5: a corrupt end record (directory size past the end of the
+    /// file) must be an error, so `work()` falls back to whole releases,
+    /// not a panic.
+    #[test]
+    fn a_corrupt_directory_size_is_an_error_not_a_crash() {
+        let mut buf = std::io::Cursor::new(Vec::new());
+        {
+            let mut z = zip::ZipWriter::new(&mut buf);
+            z.start_file("install.json", zip::write::SimpleFileOptions::default()).unwrap();
+            z.write_all(b"{}").unwrap();
+            z.finish().unwrap();
+        }
+        let mut bytes = buf.into_inner();
+        let eocd = (0..bytes.len() - 21).rev().find(|&i| u32_at(&bytes, i) == Some(EOCD)).unwrap();
+        bytes[eocd + 12..eocd + 16].copy_from_slice(&u32::MAX.to_le_bytes());
+        let fetch = |s: u64, e: u64| bytes.get(s as usize..e as usize).map(<[u8]>::to_vec).ok_or_else(|| "out of range".to_string());
+        assert!(members(bytes.len() as u64, &fetch).is_err());
     }
 }

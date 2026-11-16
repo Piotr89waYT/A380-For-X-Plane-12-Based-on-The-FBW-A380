@@ -711,7 +711,8 @@ impl StateSave {
         self.clock = AutosaveClock::from_settings(&s);
         *SETTINGS.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(s);
         if let Ok(text) = serde_json::to_string_pretty(&s) {
-            let _ = std::fs::write(&self.settings_path, text);
+            // Temp file + rename, so a crash mid-write cannot leave it empty.
+            let _ = state_snapshot::codec::write_atomic(&self.settings_path, text.as_bytes());
         }
         crate::log(&format!("state save: settings {s:?}, {removed} surplus autosave(s) removed"));
     }

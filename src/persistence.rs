@@ -23,7 +23,6 @@
 //! workstream 6 report for exactly what each owner would need to add.
 
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::mel::Deferral;
@@ -220,16 +219,8 @@ impl Persistence {
         state.cms = crate::maintenance_log::saved();
         state.oxygen = crate::deep::oxygen::live::latest_saved().or(state.oxygen);
         let json = serde_json::to_string_pretty(&state).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        let tmp = self.path.with_extension("json.tmp");
         let path = &self.path;
-        let write = move || -> std::io::Result<()> {
-            {
-                let mut f = std::fs::File::create(&tmp)?;
-                f.write_all(json.as_bytes())?;
-                f.sync_all()?;
-            }
-            std::fs::rename(&tmp, path)
-        };
+        let write = move || state_snapshot::codec::write_atomic(path, json.as_bytes());
         match file_mutex() {
             Some(m) => m.with(write),
             None => write(),

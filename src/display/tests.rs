@@ -1182,3 +1182,24 @@ fn a_right_drag_looking_around_is_not_a_right_click() {
     assert!(!dragged.is_click(soon), "and coming back does not undo the drag");
     assert!(!RightPress::new(100, 100, at).is_click(at + Duration::from_millis(900)), "held to look around without moving yet");
 }
+
+#[test]
+fn an_idle_cockpit_screen_hands_the_keyboard_back_to_x_plane() {
+    use super::{touch_typing, typing_screen, COCKPIT_KEYBOARD, TYPING_IDLE_MS};
+    use std::sync::atomic::Ordering;
+    COCKPIT_KEYBOARD.store(3, Ordering::Relaxed);
+    touch_typing(1_000);
+    assert_eq!(typing_screen(1_000 + TYPING_IDLE_MS - 1), 3, "still typing: the screen keeps the keys");
+    touch_typing(5_000);
+    assert_eq!(typing_screen(5_000 + TYPING_IDLE_MS - 1), 3, "a keystroke restarts the clock");
+    assert_eq!(typing_screen(5_000 + TYPING_IDLE_MS), -1, "idle: the keys go back to X-Plane");
+    assert_eq!(COCKPIT_KEYBOARD.load(Ordering::Relaxed), -1);
+}
+
+#[test]
+fn only_the_nds_upload_at_half_rate() {
+    assert!(super::upload_min_interval("SCREEN_DU_NDL") > super::UPLOAD_MIN_INTERVAL * 2);
+    assert_eq!(super::upload_min_interval("SCREEN_DU_NDR"), super::upload_min_interval("SCREEN_DU_NDL"));
+    assert_eq!(super::upload_min_interval("SCREEN_DU_PFDL"), super::UPLOAD_MIN_INTERVAL);
+    assert!(super::upload_min_interval("SCREEN_DU_NDL") < super::UPLOAD_MAX_WAIT, "the over-budget wait still forces a refresh later");
+}

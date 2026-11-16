@@ -2460,18 +2460,26 @@ impl Plugin {
         engine_commands::set_ground_air(self.gse.connected(gse::Service::Asu));
         crate::perf::lap("tick-inputs: engine detach");
         self.engine_detach.update(xplm, delta);
+        crate::perf::lap("tick-inputs: options and buffet");
         self.aircraft_options.update(&mut self.vars, xplm);
         self.buffet.update(&mut self.vars, xplm, delta);
+        crate::perf::lap("tick-inputs: copilot");
         self.copilot.update(&mut self.vars, xplm, delta);
+        crate::perf::lap("tick-inputs: perf cal");
         self.perf_cal.update(&mut self.vars, xplm, delta);
+        crate::perf::lap("tick-inputs: cabin crew");
         self.cabin_crew.update(&mut self.vars, xplm, delta);
+        crate::perf::lap("tick-inputs: damage effects");
         self.brake_fire_fx.update(&mut self.vars, xplm);
         self.fuel_leak_fx.update(&mut self.vars, xplm, self.fuel.as_ref());
         self.hail_dents_fx.update(&mut self.vars);
         self.windshield_cracks_fx.update(&mut self.vars);
+        crate::perf::lap("tick-inputs: hail sound and binaural");
         self.hail_sound.update(&mut self.vars, xplm, delta);
         self.binaural.update(crate::app_settings::current().binaural_audio);
+        crate::perf::lap("tick-inputs: landing report");
         self.landing_report.update(&mut self.vars, xplm, delta);
+        crate::perf::lap("tick-inputs: interphone and fap");
         self.interphone.update();
         self.fap.update(&mut self.vars);
         crate::perf::lap("tick-inputs: doors");
@@ -2767,12 +2775,8 @@ impl Plugin {
         // [slot tick-after-systems: cabin option] The EFB's "Passenger
         // cabin" switch, into the dataref the cabin objects show by.
         self.cabin_option.update(xplm, delta);
-        self.flight_deck_view.update(xplm);
-        self.light_spills.update(xplm);
         #[cfg(feature = "js")]
         display::device_grabs_on_request();
-        #[cfg(feature = "js")]
-        browser_screens::note_view(xplm);
         crate::perf::lap("tick-after-systems: flight_controls");
         // [slot tick-after-systems: flight_controls] The actuators have moved
         // this tick; X-Plane's surfaces follow.
@@ -3145,6 +3149,17 @@ impl Plugin {
                 self.vars.write_from_xplane(&self.computed.gear_pct_extended, mean);
             }
         }
+    }
+
+    /// What depends only on the camera and the sun, run every frame before the
+    /// replay and pause checks: a replay or a paused sim still changes views,
+    /// and the hidden objects must follow.
+    fn view_frame(&mut self) {
+        let xplm = self.vars.xplm;
+        self.flight_deck_view.update(xplm);
+        self.light_spills.update(xplm);
+        #[cfg(feature = "js")]
+        browser_screens::note_view(xplm);
     }
 
     /// A frame of X-Plane's replay: the recorded systems state, X-Plane's own
@@ -3761,9 +3776,10 @@ fn set_value(refcon: *mut c_void, value: f64) {
     unsafe {
         let plugin = &raw mut PLUGIN;
         if let Some(p) = (*plugin).as_mut() {
-            let name = p.vars.names.get(kind).and_then(|n| n.get(index)).cloned().unwrap_or_default();
+            // Borrowed, not cloned: this runs on every SASL write, and the trace is almost always off.
+            let name = p.vars.names.get(kind).and_then(|n| n.get(index)).map_or("", String::as_str);
             if let Some(slot) = p.vars.slots.get_mut(kind).and_then(|s| s.get_mut(index)) {
-                trace_var(&name, slot.value, value, "its dataref, written by X-Plane or another plugin (SASL Lua)");
+                trace_var(name, slot.value, value, "its dataref, written by X-Plane or another plugin (SASL Lua)");
                 slot.value = value;
             }
         }
@@ -3810,6 +3826,7 @@ unsafe extern "C" fn flight_loop(
         // A paused sim does not move FlyByWire's systems either: MSFS skips
         // the tick outright rather than running a sliver of time.
         let xplm_ref = plugin.vars.xplm;
+        plugin.view_frame();
         if plugin.replay.active(xplm_ref) {
             plugin.replay_frame();
             return -1.;
