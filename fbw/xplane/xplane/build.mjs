@@ -38,7 +38,8 @@ const FS = ['Clock', 'EWD', 'FCU', 'HUD', 'MFD', 'ND', 'OIT', 'PFD', 'RMP', 'SDv
 const REACT = ['BAT', 'EFB', 'ISISlegacy', 'OITlegacy', 'RTPI', 'SD'];
 
 const jobs = [
-  ...FS.map((n) => ({ kind: 'fs', name: n, entry: inst(n, 'instrument.tsx'), file: n.toLowerCase(), template: `A380X_${n}`, markup: `<div id="${n}_CONTENT"><h1>If you're seeing this, instrument didn't load.</h1></div>` })),
+  // panel.cfg names A380X/FCU/FCU.html; a case-sensitive filesystem (Linux) needs that exact page name.
+  ...FS.map((n) => ({ kind: 'fs', name: n, entry: inst(n, 'instrument.tsx'), file: n.toLowerCase(), page: n === 'FCU' ? 'FCU' : undefined, template: `A380X_${n}`, markup: `<div id="${n}_CONTENT"><h1>If you're seeing this, instrument didn't load.</h1></div>` })),
   ...REACT.map((n) => ({ kind: 'react', name: n, entry: inst(n, 'index.tsx'), file: n.toLowerCase(), template: n, markup: `<div id="MSFS_REACT_MOUNT"><h1>If you're seeing this, instrument didn't load.</h1></div>`, interactive: JSON.parse(fs.readFileSync(inst(n, 'config.json'), 'utf8')).isInteractive !== false })),
   { kind: 'host', name: 'SystemsHost', entry: path.join(a380, 'src/systems/systems-host/SystemsHost.ts'), file: 'SystemsHost', page: 'systems-host', template: 'A380X_SYSTEMSHOST', markup: '' },
   { kind: 'host', name: 'ExtrasHost', entry: path.join(a380, 'src/systems/extras-host/index.ts'), file: 'index', page: 'extras-host', template: 'A380X_EXTRASHOST', markup: '' },
