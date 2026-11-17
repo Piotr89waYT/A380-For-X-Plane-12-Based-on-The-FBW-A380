@@ -86,8 +86,14 @@ fn extra_switches() -> Vec<(String, Option<String>)> {
 }
 
 pub fn shared_textures() -> bool {
-    let settings = app_settings_json();
-    settings.get("displayGpu").and_then(|v| v.as_str()) != Some("integrated") && settings.get("sharedTextures").and_then(|v| v.as_bool()).unwrap_or(false)
+    shared_textures_from(&app_settings_json(), force_cpu_rendering())
+}
+
+/// On by default: copied pixels cost 8-9 ms a frame in cruise (#27 log, ~17 MB a frame), the shared texture
+/// is a GPU copy. A failed import falls back to copied pixels by itself (`gpu_refused`). Software rendering
+/// has no GPU texture to share, so it stays on copied pixels.
+fn shared_textures_from(settings: &serde_json::Value, force_cpu: bool) -> bool {
+    !force_cpu && settings.get("displayGpu").and_then(|v| v.as_str()) != Some("integrated") && settings.get("sharedTextures").and_then(|v| v.as_bool()).unwrap_or(true)
 }
 
 fn parse_switches(text: &str) -> Vec<(String, Option<String>)> {
@@ -142,6 +148,16 @@ mod tests {
         assert!(gpu.contains(&"disable-direct-composition"), "offscreen views never present through DirectComposition, and setting it up crashed the GPU process");
         assert!(!gpu.iter().any(|s| s.starts_with("disable-gpu")), "the GPU path must not switch the GPU off");
         assert_eq!(gpu_mode_switches(true), &["disable-gpu", "disable-gpu-compositing"], "the safe-mode setting still forces software rendering");
+    }
+
+    #[test]
+    fn shared_textures_default_on_and_stay_off_where_they_cannot_work() {
+        use serde_json::json;
+        assert!(shared_textures_from(&serde_json::Value::Null, false), "no settings file: on");
+        assert!(shared_textures_from(&json!({}), false), "key absent: on");
+        assert!(!shared_textures_from(&json!({ "sharedTextures": false }), false), "an explicit off still wins");
+        assert!(!shared_textures_from(&json!({ "displayGpu": "integrated" }), false), "integrated GPU: off");
+        assert!(!shared_textures_from(&json!({ "sharedTextures": true }), true), "software rendering: off");
     }
 
     #[test]
