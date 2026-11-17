@@ -1,0 +1,105 @@
+[package]
+name = "fbw_a380_systems_xp"
+version = "0.1.0"
+edition = "2021"
+description = "FlyByWire's A380X systems simulation as an X-Plane 12 plugin"
+license = "GPL-3.0-or-later"
+
+[workspace]
+members = ["crates/fms"]
+exclude = ["fbw", "msfs2xp-aircraft", "Converter", "app", "installer", "crates/gpws", "crates/tcas", "crates/hosts_misc", "crates/datalink", "crates/state_snapshot", "crates/rmp", "crates/oans", "crates/fws", "crates/fws_data", "crates/fms_host", "crates/fms_lnav", "crates/fms_vnav", "crates/fms_perf", "crates/fms_data", "crates/css_cascade", "crates/efb_pages", "crates/terrain_map", "crates/mfd_host", "crates/mfd_native", "crates/mfd_pages_a", "crates/mfd_pages_b", "crates/mfd_pages_c", "crates/mfd_pages_d", "crates/oit_native", "crates/oit_pages"]
+
+[lib]
+# rlib too, for the systems process (src/bin/fbw_a380_systems_server.rs).
+crate-type = ["cdylib", "rlib"]
+name = "fbw_a380_systems"
+
+[dependencies]
+a380_systems = { path = "fbw/xplane/fbw-a380x/src/wasm/systems/a380_systems" }
+systems = { path = "fbw/xplane/fbw-common/src/wasm/systems/systems" }
+uom = "0.37.0"
+# The failure sets FlyByWire's systems take (src/remote).
+rustc-hash = "2.1.1"
+# The JavaScript and TypeScript engine (feature "js").
+rquickjs = { version = "0.13", features = ["loader"], optional = true }
+oxc = { version = "0.150", features = ["transformer", "codegen", "semantic"], optional = true }
+# The cockpit screens (src/display, feature "js"): fill and stroke
+# tessellation, the instrument fonts, and PNG images.
+lyon_tessellation = { version = "1.0", optional = true }
+ab_glyph = { version = "0.2", optional = true }
+png = { version = "0.17", optional = true }
+# The map data (src/mapdata): X-Plane's 7z-compressed DSF scenery for the
+# terrain map, gzip for its tile cache, and JSON for FlyByWire's SimBridge
+# and AMDB messages.
+sevenz-rust2 = { version = "0.22", default-features = false }
+flate2 = "1"
+serde_json = "1"
+# src/mel.rs's persistence round trip (hyperrealism physics workstream 6)
+# derives Serialize/Deserialize; already in the tree transitively through
+# serde_json, just not as a direct dependency with the derive macros.
+serde = { version = "1", features = ["derive"] }
+# The cockpit sounds (src/sound): Vorbis decoding of Wwise's media.
+lewton = { version = "0.10", default-features = false }
+# The native computers run beside FlyByWire's JS (src/native_shadow.rs).
+gpws = { path = "crates/gpws" }
+tcas = { path = "crates/tcas" }
+hosts_misc = { path = "crates/hosts_misc" }
+# The native flight management (src/fms_navdb.rs).
+fms = { path = "crates/fms" }
+state_snapshot = { path = "crates/state_snapshot" }
+datalink = { path = "crates/datalink" }
+rmp = { path = "crates/rmp" }
+oans = { path = "crates/oans" }
+fws = { path = "crates/fws" }
+fms_host = { path = "crates/fms_host" }
+fms_lnav = { path = "crates/fms_lnav" }
+mfd_tree = { path = "crates/mfd_tree" }
+css_cascade = { path = "crates/css_cascade" }
+efb_pages = { path = "crates/efb_pages" }
+terrain_map = { path = "crates/terrain_map" }
+mfd_host = { path = "crates/mfd_host" }
+mfd_native = { path = "crates/mfd_native" }
+oit_native = { path = "crates/oit_native" }
+oit_pages = { path = "crates/oit_pages" }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D_Fxc",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+] }
+
+[dev-dependencies]
+# A reference rasteriser and PNG writer for the display snapshot tests only.
+tiny-skia = "0.11"
+# The electrical areas as MSFS runs them, checked against this crate's own
+# (src/deep/electrical_crate_parity.rs). The crate compiles this crate's
+# src/deep files; the plugin itself never links it.
+deep_electrical = { path = "crates/deep_electrical" }
+
+[features]
+default = []
+# QuickJS with an Oxc TypeScript/JSX loader, for FlyByWire's TypeScript, and
+# the screens FlyByWire's instruments draw on.
+js = ["dep:rquickjs", "dep:oxc", "dep:lyon_tessellation", "dep:ab_glyph", "dep:png"]
+# No new dependencies: only widens some already-crate-private items (Vars,
+# Xplm::dummy) to `pub` and re-exports otherwise-private modules that are
+# already written to run offline (breakers/circuits/failures/wear/
+# invariants/mel/scripted_failures/random_failures/scenarios/physics/
+# aspects), so the out-of-tree `emulator` crate (D:\A380\fbw-xp-systems\emulator)
+# can drive the real plugin code with no live X-Plane process. Does not
+# change the plugin's own behaviour or its default/js build.
+test-support = []
+# The cockpit screens drawn by the native C++/Skia displays in a380-displays
+# (src/native_displays), built with CMake by build.rs. Off by default.
+native-displays = ["js", "dep:png"]
+
+[build-dependencies]
+cc = "1"
+
+[profile.release]
+opt-level = 3
