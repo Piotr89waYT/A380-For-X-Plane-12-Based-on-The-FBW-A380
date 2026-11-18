@@ -17,7 +17,7 @@ A free, unofficial port of the [FlyByWire A380X](https://github.com/flybywiresim
 
 ## Bugs
 
-Open an [issue](https://github.com/Vihaan2012-cmyk/A380-For-X-Plane-12-Based-on-The-FBW-A380/issues) with your X-Plane `Log.txt`. It records the aircraft's state at every start.
+Open an [issue](https://github.com/Vihaan2012-cmyk/A380-For-X-Plane-12-Based-on-The-FBW-A380/issues) with your X-Plane `Log.txt`. It records the aircraft's state at every start. Go into as much detail as possible when explaining your issue, provide screenshots or videos, A well detailed issue might help us track your problem down, but a `Log.txt` might note only pinpoint the exact issue, but potentially fix any other issues leading up to your issue.
 
 ## Credits
 
